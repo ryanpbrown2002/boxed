@@ -40,6 +40,19 @@ final class TilingTests: XCTestCase {
     XCTAssertEqual(Tiling.slots(.columns, count: 2, in: r, gap: 0)[0].width, 500, accuracy: 0.001)
   }
 
+  func testStackRatioSecondarySplit() {
+    let r = CGRect(x: 0, y: 0, width: 1000, height: 600)
+    // Main + stack (3 windows): main at 0.5, stack split at 0.7.
+    let m = Tiling.slots(.mainLeft, count: 3, in: r, gap: 0, ratio: 0.5, stackRatio: 0.7)
+    XCTAssertEqual(m[0].width, 500, accuracy: 0.001)  // main, full height
+    XCTAssertEqual(m[1].height, 420, accuracy: 0.001)  // top of stack
+    XCTAssertEqual(m[2].height, 180, accuracy: 0.001)  // bottom of stack
+    XCTAssertEqual(m[2].minY, 420, accuracy: 0.001)
+    // Default stack split is even.
+    let even = Tiling.slots(.mainLeft, count: 3, in: r, gap: 0)
+    XCTAssertEqual(even[1].height, 300, accuracy: 0.001)
+  }
+
   func testClampRatio() {
     XCTAssertEqual(Tiling.clampRatio(0.5), 0.5, accuracy: 0.001)
     XCTAssertEqual(Tiling.clampRatio(0.001), Tiling.minRatio, accuracy: 0.001)  // floored

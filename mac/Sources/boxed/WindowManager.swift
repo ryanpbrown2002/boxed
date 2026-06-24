@@ -37,6 +37,7 @@ final class WindowManager {
     var layoutIndex: Int
     var order: [Int]  // order[slot] = index into `windows`
     var ratio: CGFloat = 0.5  // primary split fraction (the draggable edge)
+    var stackRatio: CGFloat = 0.5  // secondary split (between the two stacked windows)
   }
   private var session: Session?
 
@@ -117,7 +118,8 @@ final class WindowManager {
     let keepLayout = windows.count == old.windows.count
     session = Session(
       windows: windows, screen: screen, layoutIndex: keepLayout ? old.layoutIndex : 0,
-      order: Array(0..<windows.count), ratio: keepLayout ? old.ratio : 0.5)
+      order: Array(0..<windows.count), ratio: keepLayout ? old.ratio : 0.5,
+      stackRatio: keepLayout ? old.stackRatio : 0.5)
     applySession()
     if let name = currentLayoutName() { onReorganized?(name) }
   }
@@ -177,7 +179,7 @@ final class WindowManager {
     let kinds = Tiling.layouts(for: count)
     guard !kinds.isEmpty else { return nil }
     let kind = kinds[s.layoutIndex % kinds.count]
-    let rects = Tiling.slots(kind, count: count, in: usableRect(on: s.screen), gap: gap, ratio: s.ratio)
+    let rects = Tiling.slots(kind, count: count, in: usableRect(on: s.screen), gap: gap, ratio: s.ratio, stackRatio: s.stackRatio)
     guard rects.count == count else { return nil }
 
     let centers = (0..<count).map { slot in
@@ -291,47 +293,72 @@ final class WindowManager {
     ratioDirty = false
   }
 
-  /// The primary divider's frame in Cocoa (bottom-left) coordinates and its
-  /// orientation, or nil if the active layout has no single draggable split.
-  func primaryDividerCocoa() -> (frame: CGRect, vertical: Bool)? {
-    guard let s = session else { return nil }
-    let kinds = Tiling.layouts(for: s.windows.count)
-    guard !kinds.isEmpty else { return nil }
-    guard let vertical = primarySplitVertical(kinds[s.layoutIndex % kinds.count], s.windows.count)
-    else { return nil }
+  /// A draggable divider in the current layout.
+  struct Divider {
+    enum Kind { case primary, stack }
+    let kind: Kind
+    let frame: CGRect  // Cocoa (bottom-left) coords for the handle
+    let vertical: Bool  // true → drags left/right; false → up/down
+  }
+
+  /// All draggable dividers for the active layout (0–2): the primary split, plus
+  /// the secondary stack split for a 3-window Main + stack / Main + row.
+  func dividers() -> [Divider] {
+    guard let s = session else { return [] }
+    let count = s.windows.count
+    let kinds = Tiling.layouts(for: count)
+    guard !kinds.isEmpty else { return [] }
+    let kind = kinds[s.layoutIndex % kinds.count]
+    guard let primaryVertical = primarySplitVertical(kind, count) else { return [] }
 
     let usable = usableRect(on: s.screen)
     let grab: CGFloat = 16
-    let ax: CGRect
-    if vertical {
+    var out: [Divider] = []
+
+    // Primary split.
+    let primaryAX: CGRect
+    if primaryVertical {
       let x = usable.minX + usable.width * s.ratio
-      ax = CGRect(x: x - grab / 2, y: usable.minY, width: grab, height: usable.height)
+      primaryAX = CGRect(x: x - grab / 2, y: usable.minY, width: grab, height: usable.height)
     } else {
       let y = usable.minY + usable.height * s.ratio
-      ax = CGRect(x: usable.minX, y: y - grab / 2, width: usable.width, height: grab)
+      primaryAX = CGRect(x: usable.minX, y: y - grab / 2, width: usable.width, height: grab)
     }
-    return (axToCocoa(ax), vertical)
+    out.append(Divider(kind: .primary, frame: axToCocoa(primaryAX), vertical: primaryVertical))
+
+    // Secondary stack split (only the 3-window main layouts have exactly one).
+    if count == 3 {
+      let stackAX: CGRect
+      if kind == .mainLeft {
+        let stackX = usable.minX + usable.width * s.ratio
+        let y = usable.minY + usable.height * s.stackRatio
+        stackAX = CGRect(x: stackX, y: y - grab / 2, width: usable.maxX - stackX, height: grab)
+        out.append(Divider(kind: .stack, frame: axToCocoa(stackAX), vertical: false))
+      } else if kind == .mainTop {
+        let stackY = usable.minY + usable.height * s.ratio
+        let x = usable.minX + usable.width * s.stackRatio
+        stackAX = CGRect(x: x - grab / 2, y: stackY, width: grab, height: usable.maxY - stackY)
+        out.append(Divider(kind: .stack, frame: axToCocoa(stackAX), vertical: true))
+      }
+    }
+    return out
   }
 
-  /// Resize the split live from a screen-space (Cocoa) cursor point during a drag.
-  func setRatio(fromScreenPoint point: CGPoint) {
-    guard let s = session else { return }
-    let kinds = Tiling.layouts(for: s.windows.count)
-    guard !kinds.isEmpty,
-      let vertical = primarySplitVertical(kinds[s.layoutIndex % kinds.count], s.windows.count)
-    else { return }
+  /// Resize a divider live from a screen-space (Cocoa) cursor point during a drag.
+  func setRatio(forDividerAt index: Int, fromScreenPoint point: CGPoint) {
+    let ds = dividers()
+    guard index < ds.count, var s = session else { return }
     let usable = usableRect(on: s.screen)
-    let r: CGFloat =
-      vertical
+    let frac: CGFloat =
+      ds[index].vertical
       ? (point.x - usable.minX) / usable.width
       : ((primaryHeight() - point.y) - usable.minY) / usable.height
-    setRatio(r)
-  }
-
-  func setRatio(_ r: CGFloat) {
-    guard var s = session else { return }
-    s.ratio = Tiling.clampRatio(r)
+    switch ds[index].kind {
+    case .primary: s.ratio = Tiling.clampRatio(frac)
+    case .stack: s.stackRatio = Tiling.clampRatio(frac)
+    }
     session = s
+    ratioDirty = true
     applySession()
   }
 
@@ -357,7 +384,7 @@ final class WindowManager {
     guard !kinds.isEmpty else { return }
     let kind = kinds[s.layoutIndex % kinds.count]
     let usable = usableRect(on: s.screen)
-    let rects = Tiling.slots(kind, count: count, in: usable, gap: gap, ratio: s.ratio)
+    let rects = Tiling.slots(kind, count: count, in: usable, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio)
     for slot in 0..<min(count, rects.count) {
       place(s.windows[s.order[slot]], in: rects[slot], usable: usable)
     }

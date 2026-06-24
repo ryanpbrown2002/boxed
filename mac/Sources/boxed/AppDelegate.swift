@@ -9,7 +9,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var dragSwapMonitor: Any?
   private let manager = WindowManager()
   private let suggestionPanel = SuggestionPanel()
-  private let splitter = Splitter()
+
+  /// Up to two divider handles (primary + secondary stack split).
+  private lazy var splitters: [Splitter] = (0..<2).map { tag in
+    let splitter = Splitter(tag: tag)
+    splitter.onDragTo = { [weak self] tag, point in
+      self?.manager.splitterDragBegan()
+      self?.manager.setRatio(forDividerAt: tag, fromScreenPoint: point)
+      self?.positionSplitters()  // handles follow the cursor live
+    }
+    splitter.onEnd = { [weak self] _ in
+      self?.manager.splitterDragEnded()
+      self?.positionSplitters()
+    }
+    return splitter
+  }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     Log.write("launched. accessibilityTrusted=\(AXIsProcessTrusted())")
@@ -23,20 +37,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     suggestionPanel.onDismiss = { [weak self] in
       self?.manager.editMode = false
       self?.endDragSwap()
-      self?.splitter.hide()
+      self?.splitters.forEach { $0.hide() }
     }
     // When a window opens/closes during edit mode, re-tile and refresh the pill.
     manager.onReorganized = { [weak self] name in self?.showAdjustPill(layoutName: name) }
-
-    // Splitter handle: drag it to resize the split live; snap clean on release.
-    splitter.onDragTo = { [weak self] point in
-      self?.manager.splitterDragBegan()
-      self?.manager.setRatio(fromScreenPoint: point)
-    }
-    splitter.onEnd = { [weak self] in
-      self?.manager.splitterDragEnded()
-      self?.positionSplitter()
-    }
     manager.start()
     installShortcuts()
     startCommandHook()
@@ -66,7 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private func showAdjustPill(layoutName: String) {
     manager.editMode = true
     beginDragSwap()
-    positionSplitter()
+    positionSplitters()
     let swap = WindowSuggestion(label: "⇄ Swap", keepsPanelOpen: true) { [weak self] in
       guard let self else { return }
       self.showAdjustPill(layoutName: self.manager.swap() ?? layoutName)
@@ -79,13 +83,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       title: layoutName, [swap, rebox], near: bottomCenterAnchor(), prominent: true)
   }
 
-  /// Place the divider handle on the current layout's primary split (or hide it
-  /// when the layout has no single draggable divider).
-  private func positionSplitter() {
-    if let divider = manager.primaryDividerCocoa() {
-      splitter.show(frame: divider.frame, vertical: divider.vertical)
-    } else {
-      splitter.hide()
+  /// Place each divider handle on its split (hiding any unused handles).
+  private func positionSplitters() {
+    let dividers = manager.dividers()
+    for (index, splitter) in splitters.enumerated() {
+      if index < dividers.count {
+        splitter.show(frame: dividers[index].frame, vertical: dividers[index].vertical)
+      } else {
+        splitter.hide()
+      }
     }
   }
 

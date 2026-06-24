@@ -71,7 +71,8 @@ public enum Tiling {
   /// main-vs-stack divide for Main + stack / row. It's ignored by layouts without
   /// a single primary split (even Columns/Rows of 3+, Grid, BSP).
   public static func slots(
-    _ kind: LayoutKind, count: Int, in rect: CGRect, gap: CGFloat = 8, ratio: CGFloat = 0.5
+    _ kind: LayoutKind, count: Int, in rect: CGRect, gap: CGFloat = 8, ratio: CGFloat = 0.5,
+    stackRatio: CGFloat = 0.5
   ) -> [CGRect] {
     guard count > 0, rect.width > 0, rect.height > 0 else { return [] }
     switch kind {
@@ -84,9 +85,9 @@ public enum Tiling {
     case .grid:
       return inset(grid(count, rect), by: gap)
     case .mainLeft:
-      return inset(mainLeft(count, rect, ratio: ratio), by: gap)
+      return inset(mainLeft(count, rect, ratio: ratio, stackRatio: stackRatio), by: gap)
     case .mainTop:
-      return inset(mainTop(count, rect, ratio: ratio), by: gap)
+      return inset(mainTop(count, rect, ratio: ratio, stackRatio: stackRatio), by: gap)
     }
   }
 
@@ -134,24 +135,44 @@ public enum Tiling {
     }
   }
 
-  static func mainLeft(_ n: Int, _ r: CGRect, ratio: CGFloat = 0.5) -> [CGRect] {
+  static func mainLeft(_ n: Int, _ r: CGRect, ratio: CGFloat = 0.5, stackRatio: CGFloat = 0.5)
+    -> [CGRect]
+  {
     guard n > 1 else { return [r] }
     let mainW = r.width * ratio
+    let stackX = r.minX + mainW
+    let stackW = r.width - mainW
     var out = [CGRect(x: r.minX, y: r.minY, width: mainW, height: r.height)]
-    let h = r.height / CGFloat(n - 1)
-    for j in 0..<(n - 1) {
-      out.append(CGRect(x: r.minX + mainW, y: r.minY + CGFloat(j) * h, width: r.width - mainW, height: h))
+    if n - 1 == 2 {  // two-window stack: the divider is adjustable
+      let h0 = r.height * stackRatio
+      out.append(CGRect(x: stackX, y: r.minY, width: stackW, height: h0))
+      out.append(CGRect(x: stackX, y: r.minY + h0, width: stackW, height: r.height - h0))
+    } else {
+      let h = r.height / CGFloat(n - 1)
+      for j in 0..<(n - 1) {
+        out.append(CGRect(x: stackX, y: r.minY + CGFloat(j) * h, width: stackW, height: h))
+      }
     }
     return out
   }
 
-  static func mainTop(_ n: Int, _ r: CGRect, ratio: CGFloat = 0.5) -> [CGRect] {
+  static func mainTop(_ n: Int, _ r: CGRect, ratio: CGFloat = 0.5, stackRatio: CGFloat = 0.5)
+    -> [CGRect]
+  {
     guard n > 1 else { return [r] }
     let mainH = r.height * ratio
+    let stackY = r.minY + mainH
+    let stackH = r.height - mainH
     var out = [CGRect(x: r.minX, y: r.minY, width: r.width, height: mainH)]
-    let w = r.width / CGFloat(n - 1)
-    for j in 0..<(n - 1) {
-      out.append(CGRect(x: r.minX + CGFloat(j) * w, y: r.minY + mainH, width: w, height: r.height - mainH))
+    if n - 1 == 2 {
+      let w0 = r.width * stackRatio
+      out.append(CGRect(x: r.minX, y: stackY, width: w0, height: stackH))
+      out.append(CGRect(x: r.minX + w0, y: stackY, width: r.width - w0, height: stackH))
+    } else {
+      let w = r.width / CGFloat(n - 1)
+      for j in 0..<(n - 1) {
+        out.append(CGRect(x: r.minX + CGFloat(j) * w, y: stackY, width: w, height: stackH))
+      }
     }
     return out
   }
