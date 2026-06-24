@@ -22,7 +22,7 @@ public enum Tiling {
     case ..<1: return []
     case 1: return [.columns]
     case 2: return [.columns, .rows]
-    case 3: return [.columns, .rows, .mainLeft, .mainTop]
+    case 3: return [.mainLeft, .columns, .rows, .mainTop]
     case 4: return [.grid, .columns, .rows, .mainLeft]
     default: return [.bsp]
     }

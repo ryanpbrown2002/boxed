@@ -11,7 +11,8 @@ final class TilingTests: XCTestCase {
   func testLayoutsPerCount() {
     XCTAssertEqual(Tiling.layouts(for: 1), [.columns])
     XCTAssertEqual(Tiling.layouts(for: 2), [.columns, .rows])
-    XCTAssertEqual(Tiling.layouts(for: 3), [.columns, .rows, .mainLeft, .mainTop])
+    XCTAssertEqual(Tiling.layouts(for: 3), [.mainLeft, .columns, .rows, .mainTop])
+    XCTAssertEqual(Tiling.layouts(for: 3).first, .mainLeft)  // main+stack is the default
     XCTAssertEqual(Tiling.layouts(for: 4), [.grid, .columns, .rows, .mainLeft])
     XCTAssertEqual(Tiling.layouts(for: 6), [.bsp])  // 5+ falls back
     XCTAssertEqual(Tiling.layouts(for: 0), [])
