@@ -196,6 +196,10 @@ final class WindowManager {
   @discardableResult
   func organizeOrEdit() -> String? {
     guard let screen = screenUnderCursor() else { return nil }
+    if fullscreenWindow(on: screen) != nil {
+      Log.write("fullscreen display — not organizing/editing")
+      return nil
+    }
     activeDisplay = displayID(screen)
     let onScreen = tileableWindows().filter {
       frame(of: $0).map { screenContains(screen, $0) } ?? false
@@ -848,6 +852,51 @@ final class WindowManager {
   private func currentScreen(of window: AXUIElement) -> NSScreen? {
     guard let f = frame(of: window) else { return nil }
     return NSScreen.screens.first { screenContains($0, f) }
+  }
+
+  // MARK: - Fullscreen
+
+  private func isFullscreen(_ window: AXUIElement) -> Bool {
+    var value: CFTypeRef?
+    if AXUIElementCopyAttributeValue(window, "AXFullScreen" as CFString, &value) == .success,
+      let flag = value as? Bool
+    {
+      return flag
+    }
+    return false
+  }
+
+  /// A native-fullscreen window on the given display, if any.
+  private func fullscreenWindow(on screen: NSScreen) -> AXUIElement? {
+    tileableWindows().first { w in
+      (frame(of: w).map { screenContains(screen, $0) } ?? false) && isFullscreen(w)
+    }
+  }
+
+  /// Is the display under the cursor showing a native-fullscreen window? Tiling
+  /// can't touch a fullscreen Space, so boxed offers "minimize" instead of edit.
+  func isFullscreenContext() -> Bool {
+    guard let screen = screenUnderCursor() else { return false }
+    return fullscreenWindow(on: screen) != nil
+  }
+
+  /// Drop the fullscreen window out of fullscreen and snap it to the left half,
+  /// so it's usable (and boxable) again.
+  func minimizeFullscreenWindow() {
+    guard let screen = screenUnderCursor(), let window = fullscreenWindow(on: screen) else { return }
+    Log.write("exiting fullscreen → snapping left")
+    AXUIElementSetAttributeValue(
+      window, "AXFullScreen" as CFString, kCFBooleanFalse)
+    // Let the exit animation finish before placing it.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+      guard let self else { return }
+      let usable = self.usableRect(on: screen)
+      let left = CGRect(
+        x: usable.minX, y: usable.minY, width: (usable.width - self.gap) / 2, height: usable.height)
+      self.setPosition(window, left.origin)
+      self.setSize(window, left.size)
+      self.setPosition(window, left.origin)
+    }
   }
 
   // MARK: - Live window events

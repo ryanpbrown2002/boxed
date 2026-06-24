@@ -107,6 +107,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
   /// Place each divider handle on its split (hiding any unused handles).
   private func positionSplitters() {
+    // Never show handles over a fullscreen Space — they'd do nothing.
+    if manager.isFullscreenContext() {
+      splitters.forEach { $0.hide() }
+      return
+    }
     let dividers = manager.dividers()
     for (index, splitter) in splitters.enumerated() {
       if index < dividers.count {
@@ -233,9 +238,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   /// Keep the organize item in step with what's on screen: disabled when there
   /// are no windows to act on, and labeled "Edit tabs" when they're already tiled.
   func menuNeedsUpdate(_ menu: NSMenu) {
+    if manager.isFullscreenContext() {
+      // Can't tile a fullscreen Space — offer to drop out of it instead.
+      organizeItem.title = "Minimize window"
+      organizeItem.isEnabled = true
+      organizeItem.action = #selector(minimizeFullscreen)
+      return
+    }
+    organizeItem.action = #selector(organizeNow)
     let count = manager.tileableCount()
     organizeItem.isEnabled = count >= 1
     organizeItem.title = manager.isAlreadyOrganized() ? "Edit tabs" : "Organize tabs now"
+  }
+
+  @objc private func minimizeFullscreen() {
+    manager.minimizeFullscreenWindow()
   }
 
   @objc private func toggleSuggest() {
