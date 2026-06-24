@@ -109,12 +109,19 @@ final class WindowManager {
   private func reflow() {
     guard let old = session else { return }
     let screen = old.screen
-    let onScreen = tileableWindows().filter {
-      frame(of: $0).map { screenContains(screen, $0) } ?? false
+    // Keep the windows we're already managing that still exist. A window shoved
+    // off-screen by Show Desktop / a Spaces transition is still alive — it must
+    // not be dropped just because it isn't in the on-screen scan this instant.
+    let alive = old.windows.filter { isTileable($0) && frame(of: $0) != nil }
+    // Add genuinely new on-screen windows we aren't tracking yet.
+    let newcomers = tileableWindows().filter { candidate in
+      (frame(of: candidate).map { screenContains(screen, $0) } ?? false)
+        && !alive.contains { CFEqual($0, candidate) }
     }
-    guard !onScreen.isEmpty else { return }
+    let combined = alive + newcomers
+    guard !combined.isEmpty else { return }
     let usable = usableRect(on: screen)
-    let windows = onScreen.filter { !isSmall($0, usable) } + onScreen.filter { isSmall($0, usable) }
+    let windows = combined.filter { !isSmall($0, usable) } + combined.filter { isSmall($0, usable) }
     let keepLayout = windows.count == old.windows.count
     session = Session(
       windows: windows, screen: screen, layoutIndex: keepLayout ? old.layoutIndex : 0,
