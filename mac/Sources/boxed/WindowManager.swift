@@ -161,7 +161,7 @@ final class WindowManager {
 
     if let s = session, sameWindowSet(s.windows, onScreen) {
       Log.write("re-align (already organized) — keeping \(currentLayoutName() ?? "layout")")
-      applySession()  // tidy back into the current layout; don't remix
+      realignToNearestSlots()  // snap to nearest slot; keep layout + dragged ratios
       return currentLayoutName()
     }
     return organize()
@@ -170,6 +170,58 @@ final class WindowManager {
   private func sameWindowSet(_ a: [AXUIElement], _ b: [AXUIElement]) -> Bool {
     guard a.count == b.count else { return false }
     return b.allSatisfy { w in a.contains { CFEqual($0, w) } }
+  }
+
+  /// Re-assign windows to the current layout's slots by nearest position — each
+  /// window snaps to the slot closest to where it already is — while preserving
+  /// the layout choice and any dragged ratios. "Match the closest place, but
+  /// organized." This avoids replaying a stale order that would shuffle windows.
+  private func realignToNearestSlots() {
+    guard let s = session else { return }
+    let count = s.windows.count
+    let kinds = Tiling.layouts(for: count)
+    guard !kinds.isEmpty else { return }
+    let kind = kinds[s.layoutIndex % kinds.count]
+    let rects = Tiling.slots(
+      kind, count: count, in: usableRect(on: s.screen), gap: gap, ratio: s.ratio,
+      stackRatio: s.stackRatio)
+    guard rects.count == count else {
+      applySession()
+      return
+    }
+
+    let centers = s.windows.map { frame(of: $0).map { CGPoint(x: $0.midX, y: $0.midY) } }
+    var used = Set<Int>()
+    var order = [Int](repeating: 0, count: count)
+    for slot in 0..<count {
+      let target = CGPoint(x: rects[slot].midX, y: rects[slot].midY)
+      var best = -1
+      var bestDist = CGFloat.greatestFiniteMagnitude
+      for w in 0..<count where !used.contains(w) {
+        let d = centers[w].map { hypot($0.x - target.x, $0.y - target.y) } ?? .greatestFiniteMagnitude
+        if d < bestDist {
+          bestDist = d
+          best = w
+        }
+      }
+      if best < 0 { best = (0..<count).first { !used.contains($0) } ?? slot }
+      used.insert(best)
+      order[slot] = best
+    }
+    var next = s
+    next.order = order
+    session = next
+    Log.write("realign -> order \(order)")
+    applySession()
+  }
+
+  /// Debug/test hook: set the split ratios directly.
+  func setRatios(primary: CGFloat?, stack: CGFloat?) {
+    guard var s = session else { return }
+    if let primary { s.ratio = Tiling.clampRatio(primary) }
+    if let stack { s.stackRatio = Tiling.clampRatio(stack) }
+    session = s
+    applySession()
   }
 
   /// Cycle to the next layout for the current window count and re-apply.

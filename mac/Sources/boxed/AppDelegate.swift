@@ -156,7 +156,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       case "rebox": if let name = self.manager.rebox() { self.showAdjustPill(layoutName: name) }
       case "swap": if let name = self.manager.swap() { self.showAdjustPill(layoutName: name) }
       case "dismiss": self.suggestionPanel.dismiss()
-      default: break
+      default:
+        if cmd.hasPrefix("ratio "), let v = Double(cmd.dropFirst(6)) {
+          self.manager.setRatios(primary: CGFloat(v), stack: nil)
+        } else if cmd.hasPrefix("stack "), let v = Double(cmd.dropFirst(6)) {
+          self.manager.setRatios(primary: nil, stack: CGFloat(v))
+        }
       }
     }
   }
