@@ -80,7 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       self.showAdjustPill(layoutName: self.manager.rebox() ?? layoutName)
     }
     suggestionPanel.present(
-      title: layoutName, [rebox], near: bottomCenterAnchor(), prominent: true)
+      title: nil, [rebox], near: bottomCenterAnchor(), prominent: true)
   }
 
   /// Place each divider handle on its split (hiding any unused handles).
