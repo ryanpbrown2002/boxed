@@ -11,8 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private let manager = WindowManager()
   private let suggestionPanel = SuggestionPanel()
 
-  /// Up to two divider handles (primary + secondary stack split).
-  private lazy var splitters: [Splitter] = (0..<2).map { tag in
+  /// Up to six handles: internal split(s) + the four outer edges.
+  private lazy var splitters: [Splitter] = (0..<6).map { tag in
     let splitter = Splitter(tag: tag)
     splitter.onDragTo = { [weak self] tag, point in
       self?.suggestionPanel.holdOpen()  // don't let edit mode fade mid-drag
@@ -167,6 +167,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
           self.manager.setRatios(primary: CGFloat(v), stack: nil)
         } else if cmd.hasPrefix("stack "), let v = Double(cmd.dropFirst(6)) {
           self.manager.setRatios(primary: nil, stack: CGFloat(v))
+        } else if cmd.hasPrefix("inset ") {
+          let parts = cmd.dropFirst(6).split(separator: " ")
+          if parts.count == 2, let v = Double(parts[1]) {
+            self.manager.setInset(String(parts[0]), CGFloat(v))
+          }
         }
       }
     }

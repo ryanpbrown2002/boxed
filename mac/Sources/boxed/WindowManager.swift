@@ -38,6 +38,12 @@ final class WindowManager {
     var order: [Int]  // order[slot] = index into `windows`
     var ratio: CGFloat = 0.5  // primary split fraction (the draggable edge)
     var stackRatio: CGFloat = 0.5  // secondary split (between the two stacked windows)
+    // Outer margins (points) — drag the edge handles to inset the tiled region and
+    // let the desktop show around it.
+    var insetTop: CGFloat = 0
+    var insetBottom: CGFloat = 0
+    var insetLeft: CGFloat = 0
+    var insetRight: CGFloat = 0
   }
   private var session: Session?
 
@@ -46,9 +52,6 @@ final class WindowManager {
   /// True while a splitter handle is being dragged — pauses auto-reflow so windows
   /// don't jump mid-adjust.
   private(set) var draggingSplitter = false
-  /// Windows boxed just resized, so their resize echoes can be ignored (vs. a
-  /// genuine user drag). Pairs of (window, ignore-until).
-  private var recentlySized: [(window: AXUIElement, until: DispatchTime)] = []
 
   func start() {
     let nc = NSWorkspace.shared.notificationCenter
@@ -132,7 +135,9 @@ final class WindowManager {
     session = Session(
       windows: windows, screen: screen, layoutIndex: keepLayout ? old.layoutIndex : 0,
       order: Array(0..<windows.count), ratio: keepLayout ? old.ratio : 0.5,
-      stackRatio: keepLayout ? old.stackRatio : 0.5)
+      stackRatio: keepLayout ? old.stackRatio : 0.5,
+      insetTop: keepLayout ? old.insetTop : 0, insetBottom: keepLayout ? old.insetBottom : 0,
+      insetLeft: keepLayout ? old.insetLeft : 0, insetRight: keepLayout ? old.insetRight : 0)
     applySession()
     if let name = currentLayoutName() { onReorganized?(name) }
   }
@@ -213,7 +218,7 @@ final class WindowManager {
     guard !kinds.isEmpty else { return }
     let kind = kinds[s.layoutIndex % kinds.count]
     let rects = Tiling.slots(
-      kind, count: count, in: usableRect(on: s.screen), gap: gap, ratio: s.ratio,
+      kind, count: count, in: effectiveRect(usableRect(on: s.screen), s), gap: gap, ratio: s.ratio,
       stackRatio: s.stackRatio)
     guard rects.count == count else {
       applySession()
@@ -242,6 +247,21 @@ final class WindowManager {
     next.order = order
     session = next
     Log.write("realign -> order \(order)")
+    applySession()
+  }
+
+  /// Debug/test hook: set an outer inset (points) directly.
+  func setInset(_ edge: String, _ points: CGFloat) {
+    guard var s = session, let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+    let usable = usableRect(on: screen)
+    switch edge {
+    case "top": s.insetTop = clampInset(points, usable.height)
+    case "bottom": s.insetBottom = clampInset(points, usable.height)
+    case "left": s.insetLeft = clampInset(points, usable.width)
+    case "right": s.insetRight = clampInset(points, usable.width)
+    default: return
+    }
+    session = s
     applySession()
   }
 
@@ -286,7 +306,9 @@ final class WindowManager {
     let kinds = Tiling.layouts(for: count)
     guard !kinds.isEmpty else { return nil }
     let kind = kinds[s.layoutIndex % kinds.count]
-    let rects = Tiling.slots(kind, count: count, in: usableRect(on: s.screen), gap: gap, ratio: s.ratio, stackRatio: s.stackRatio)
+    let rects = Tiling.slots(
+      kind, count: count, in: effectiveRect(usableRect(on: s.screen), s), gap: gap, ratio: s.ratio,
+      stackRatio: s.stackRatio)
     guard rects.count == count else { return nil }
 
     let centers = (0..<count).map { slot in
@@ -342,55 +364,6 @@ final class WindowManager {
     return currentLayoutName()
   }
 
-  /// While in edit mode, the user resized a tiled window. If that window owns one
-  /// side of the layout's primary split (Left/Right, Top/Bottom, or Main+stack),
-  /// treat the dragged edge as the divider and slide the other side(s) to meet it —
-  /// VS Code-style. The dragged window is left exactly where the user put it.
-  func handleWindowResized(_ window: AXUIElement) {
-    guard editMode, let s = session, !wasRecentlySized(window) else { return }
-    let count = s.windows.count
-    let kinds = Tiling.layouts(for: count)
-    guard !kinds.isEmpty else { return }
-    let kind = kinds[s.layoutIndex % kinds.count]
-
-    let vertical: Bool
-    switch kind {
-    case .columns where count == 2, .mainLeft: vertical = true
-    case .rows where count == 2, .mainTop: vertical = false
-    default: return  // no single draggable primary split
-    }
-
-    guard
-      let slot = (0..<count).first(where: { CFEqual(s.windows[s.order[$0]], window) }),
-      let f = frame(of: window)
-    else { return }
-    let usable = usableRect(on: s.screen)
-
-    // The divider is the edge of this window that faces the split.
-    var ratio: CGFloat
-    if vertical {
-      ratio = slot == 0 ? (f.maxX - usable.minX) / usable.width : (f.minX - usable.minX) / usable.width
-    } else {
-      ratio = slot == 0 ? (f.maxY - usable.minY) / usable.height : (f.minY - usable.minY) / usable.height
-    }
-    ratio = Tiling.clampRatio(ratio)
-    guard abs(ratio - s.ratio) > 0.004 else { return }
-
-    var next = s
-    next.ratio = ratio
-    session = next
-    ratioDirty = true
-
-    // Move every OTHER window to meet the new divider; don't touch the dragged one.
-    let rects = Tiling.slots(kind, count: count, in: usable, gap: gap, ratio: ratio)
-    for other in 0..<count where other != slot {
-      let w = s.windows[s.order[other]]
-      setPosition(w, rects[other].origin)
-      setSize(w, rects[other].size)
-      setPosition(w, rects[other].origin)
-    }
-    Log.write("edge drag -> ratio \(String(format: "%.2f", ratio))")
-  }
 
   // MARK: - Splitter (drag a divider to resize the split)
 
@@ -402,67 +375,104 @@ final class WindowManager {
 
   /// A draggable divider in the current layout.
   struct Divider {
-    enum Kind { case primary, stack }
+    enum Kind { case primary, stack, edgeTop, edgeBottom, edgeLeft, edgeRight }
     let kind: Kind
     let frame: CGRect  // Cocoa (bottom-left) coords for the handle
     let vertical: Bool  // true → drags left/right; false → up/down
   }
 
-  /// All draggable dividers for the active layout (0–2): the primary split, plus
-  /// the secondary stack split for a 3-window Main + stack / Main + row.
+  /// All draggable handles for the active layout: the internal split(s) plus the
+  /// four outer edges. Dragging an edge inward insets the tiled region and lets
+  /// the desktop show around it. Edges are always present; internal splits depend
+  /// on the layout.
   func dividers() -> [Divider] {
     guard let s = session else { return [] }
     let count = s.windows.count
     let kinds = Tiling.layouts(for: count)
     guard !kinds.isEmpty else { return [] }
     let kind = kinds[s.layoutIndex % kinds.count]
-    guard let primaryVertical = primarySplitVertical(kind, count) else { return [] }
 
     let usable = usableRect(on: s.screen)
+    let eff = effectiveRect(usable, s)
     let grab: CGFloat = 16
     var out: [Divider] = []
 
-    // Primary split.
-    let primaryAX: CGRect
-    if primaryVertical {
-      let x = usable.minX + usable.width * s.ratio
-      primaryAX = CGRect(x: x - grab / 2, y: usable.minY, width: grab, height: usable.height)
-    } else {
-      let y = usable.minY + usable.height * s.ratio
-      primaryAX = CGRect(x: usable.minX, y: y - grab / 2, width: usable.width, height: grab)
-    }
-    out.append(Divider(kind: .primary, frame: axToCocoa(primaryAX), vertical: primaryVertical))
+    // Internal split(s), within the inset region.
+    if let primaryVertical = primarySplitVertical(kind, count) {
+      let primaryAX: CGRect
+      if primaryVertical {
+        let x = eff.minX + eff.width * s.ratio
+        primaryAX = CGRect(x: x - grab / 2, y: eff.minY, width: grab, height: eff.height)
+      } else {
+        let y = eff.minY + eff.height * s.ratio
+        primaryAX = CGRect(x: eff.minX, y: y - grab / 2, width: eff.width, height: grab)
+      }
+      out.append(Divider(kind: .primary, frame: axToCocoa(primaryAX), vertical: primaryVertical))
 
-    // Secondary stack split (only the 3-window main layouts have exactly one).
-    if count == 3 {
-      let stackAX: CGRect
-      if kind == .mainLeft {
-        let stackX = usable.minX + usable.width * s.ratio
-        let y = usable.minY + usable.height * s.stackRatio
-        stackAX = CGRect(x: stackX, y: y - grab / 2, width: usable.maxX - stackX, height: grab)
-        out.append(Divider(kind: .stack, frame: axToCocoa(stackAX), vertical: false))
-      } else if kind == .mainTop {
-        let stackY = usable.minY + usable.height * s.ratio
-        let x = usable.minX + usable.width * s.stackRatio
-        stackAX = CGRect(x: x - grab / 2, y: stackY, width: grab, height: usable.maxY - stackY)
-        out.append(Divider(kind: .stack, frame: axToCocoa(stackAX), vertical: true))
+      if count == 3, kind == .mainLeft {
+        let stackX = eff.minX + eff.width * s.ratio
+        let y = eff.minY + eff.height * s.stackRatio
+        out.append(
+          Divider(
+            kind: .stack,
+            frame: axToCocoa(
+              CGRect(x: stackX, y: y - grab / 2, width: eff.maxX - stackX, height: grab)),
+            vertical: false))
+      } else if count == 3, kind == .mainTop {
+        let stackY = eff.minY + eff.height * s.ratio
+        let x = eff.minX + eff.width * s.stackRatio
+        out.append(
+          Divider(
+            kind: .stack,
+            frame: axToCocoa(
+              CGRect(x: x - grab / 2, y: stackY, width: grab, height: eff.maxY - stackY)),
+            vertical: true))
       }
     }
+
+    // Outer edges — drag inward to inset the whole region (reveal desktop).
+    out.append(
+      Divider(
+        kind: .edgeLeft,
+        frame: axToCocoa(CGRect(x: eff.minX - grab / 2, y: eff.minY, width: grab, height: eff.height)),
+        vertical: true))
+    out.append(
+      Divider(
+        kind: .edgeRight,
+        frame: axToCocoa(CGRect(x: eff.maxX - grab / 2, y: eff.minY, width: grab, height: eff.height)),
+        vertical: true))
+    out.append(
+      Divider(
+        kind: .edgeTop,
+        frame: axToCocoa(CGRect(x: eff.minX, y: eff.minY - grab / 2, width: eff.width, height: grab)),
+        vertical: false))
+    out.append(
+      Divider(
+        kind: .edgeBottom,
+        frame: axToCocoa(CGRect(x: eff.minX, y: eff.maxY - grab / 2, width: eff.width, height: grab)),
+        vertical: false))
     return out
   }
 
-  /// Resize a divider live from a screen-space (Cocoa) cursor point during a drag.
+  /// Resize a divider/edge live from a screen-space (Cocoa) cursor point.
   func setRatio(forDividerAt index: Int, fromScreenPoint point: CGPoint) {
     let ds = dividers()
     guard index < ds.count, var s = session else { return }
     let usable = usableRect(on: s.screen)
-    let frac: CGFloat =
-      ds[index].vertical
-      ? (point.x - usable.minX) / usable.width
-      : ((primaryHeight() - point.y) - usable.minY) / usable.height
+    let eff = effectiveRect(usable, s)
+    let axY = primaryHeight() - point.y  // Cocoa → AX (top-left) y
+
     switch ds[index].kind {
-    case .primary: s.ratio = Tiling.clampRatio(frac)
-    case .stack: s.stackRatio = Tiling.clampRatio(frac)
+    case .primary:
+      s.ratio = Tiling.clampRatio(
+        ds[index].vertical ? (point.x - eff.minX) / eff.width : (axY - eff.minY) / eff.height)
+    case .stack:
+      s.stackRatio = Tiling.clampRatio(
+        ds[index].vertical ? (point.x - eff.minX) / eff.width : (axY - eff.minY) / eff.height)
+    case .edgeLeft: s.insetLeft = clampInset(point.x - usable.minX, usable.width)
+    case .edgeRight: s.insetRight = clampInset(usable.maxX - point.x, usable.width)
+    case .edgeTop: s.insetTop = clampInset(axY - usable.minY, usable.height)
+    case .edgeBottom: s.insetBottom = clampInset(usable.maxY - axY, usable.height)
     }
     session = s
     ratioDirty = true
@@ -475,6 +485,19 @@ final class WindowManager {
     case .rows where count == 2, .mainTop: return false
     default: return nil
     }
+  }
+
+  /// The tiled region after the outer margins are applied (AX top-left coords).
+  private func effectiveRect(_ usable: CGRect, _ s: Session) -> CGRect {
+    CGRect(
+      x: usable.minX + s.insetLeft,
+      y: usable.minY + s.insetTop,
+      width: max(usable.width * 0.2, usable.width - s.insetLeft - s.insetRight),
+      height: max(usable.height * 0.2, usable.height - s.insetTop - s.insetBottom))
+  }
+
+  private func clampInset(_ value: CGFloat, _ dimension: CGFloat) -> CGFloat {
+    min(max(value, 0), dimension * 0.45)
   }
 
   func currentLayoutName() -> String? {
@@ -491,7 +514,9 @@ final class WindowManager {
     guard !kinds.isEmpty else { return }
     let kind = kinds[s.layoutIndex % kinds.count]
     let usable = usableRect(on: s.screen)
-    let rects = Tiling.slots(kind, count: count, in: usable, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio)
+    let eff = effectiveRect(usable, s)
+    let rects = Tiling.slots(
+      kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio)
     for slot in 0..<min(count, rects.count) {
       place(s.windows[s.order[slot]], in: rects[slot], usable: usable)
     }
@@ -659,21 +684,10 @@ final class WindowManager {
   }
 
   private func setSize(_ window: AXUIElement, _ size: CGSize) {
-    markSized(window)  // so the resulting resize echo isn't read as a user drag
     var s = size
     if let value = AXValueCreate(.cgSize, &s) {
       AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, value)
     }
-  }
-
-  private func markSized(_ window: AXUIElement) {
-    recentlySized.append((window, .now() + .milliseconds(300)))
-  }
-
-  private func wasRecentlySized(_ window: AXUIElement) -> Bool {
-    let now = DispatchTime.now()
-    recentlySized.removeAll { $0.until < now }
-    return recentlySized.contains { CFEqual($0.window, window) }
   }
 
   private func isSizeSettable(_ window: AXUIElement) -> Bool {
@@ -731,9 +745,6 @@ final class WindowManager {
         }
       } else if note == (kAXUIElementDestroyedNotification as String) {
         DispatchQueue.main.async { manager.handleWindowClosed() }
-      } else if note == (kAXWindowResizedNotification as String) {
-        let window = element
-        DispatchQueue.main.async { manager.handleWindowResized(window) }
       }
     }
     guard AXObserverCreate(pid, callback, &observer) == .success, let observer else { return }
@@ -743,8 +754,6 @@ final class WindowManager {
     AXObserverAddNotification(observer, appElement, kAXWindowCreatedNotification as CFString, refcon)
     AXObserverAddNotification(
       observer, appElement, kAXUIElementDestroyedNotification as CFString, refcon)
-    AXObserverAddNotification(
-      observer, appElement, kAXWindowResizedNotification as CFString, refcon)
     CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
     observers[pid] = observer
   }
