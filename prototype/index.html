@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>boxed</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#0c0d10;
+    --ink-2:#121419;
+    --ink-3:#181b22;
+    --line:#23262f;
+    --line-2:#2d313c;
+    --txt:#e7e9ee;
+    --txt-dim:#8a8f9c;
+    --txt-faint:#565b67;
+    --accent:#c6ff3a;
+    --accent-dim:#7f9e2a;
+    --gutter:7px;
+    --rail:30px;
+    --radius:12px;
+    --shelf:52px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--ink);
+    color:var(--txt);
+    font-family:"Bricolage Grotesque",system-ui,sans-serif;
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+    /* faint blueprint grid */
+    background-image:
+      linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);
+    background-size:28px 28px;
+  }
+
+  /* ───────────────────────── shelf (top bar) ───────────────────────── */
+  .shelf{
+    height:var(--shelf);
+    display:flex;align-items:center;gap:18px;
+    padding:0 16px;
+    border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,var(--ink-2),var(--ink));
+    position:relative;z-index:50;
+    user-select:none;
+  }
+  .brand{display:flex;align-items:baseline;gap:9px;padding-right:4px}
+  .brand .mark{
+    width:18px;height:18px;border:2px solid var(--accent);border-radius:4px;
+    position:relative;align-self:center;
+    box-shadow:0 0 12px -2px var(--accent);
+  }
+  .brand .mark::after{content:"";position:absolute;inset:3px;border:1px solid var(--accent-dim);border-radius:1px}
+  .brand h1{
+    font-size:20px;font-weight:800;letter-spacing:-.02em;
+  }
+  .brand .tag{font-family:"JetBrains Mono",monospace;font-size:10px;color:var(--txt-faint);letter-spacing:.18em;text-transform:uppercase}
+
+  .sep{width:1px;height:24px;background:var(--line)}
+
+  .group{display:flex;align-items:center;gap:6px}
+  .lbl{font-family:"JetBrains Mono",monospace;font-size:9.5px;color:var(--txt-faint);letter-spacing:.16em;text-transform:uppercase;margin-right:2px}
+
+  .preset{
+    width:34px;height:30px;border:1px solid var(--line-2);border-radius:7px;
+    background:var(--ink-3);cursor:pointer;display:grid;gap:2px;padding:5px;
+    transition:border-color .15s,background .15s,transform .08s;
+  }
+  .preset:hover{border-color:var(--txt-faint);transform:translateY(-1px)}
+  .preset.on{border-color:var(--accent);background:#1b2110}
+  .preset i{background:var(--txt-faint);border-radius:1.5px;display:block}
+  .preset.on i{background:var(--accent)}
+  .p-1{grid-template-columns:1fr}
+  .p-2c{grid-template-columns:1fr 1fr}
+  .p-2r{grid-template-rows:1fr 1fr}
+  .p-3{grid-template-columns:1fr 1fr 1fr}
+  .p-4{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr}
+
+  .btn{
+    height:30px;padding:0 12px;border:1px solid var(--line-2);border-radius:7px;
+    background:var(--ink-3);color:var(--txt-dim);cursor:pointer;
+    font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.04em;
+    display:inline-flex;align-items:center;gap:6px;
+    transition:border-color .15s,color .15s,transform .08s,background .15s;
+  }
+  .btn:hover{border-color:var(--txt-faint);color:var(--txt);transform:translateY(-1px)}
+  .btn:active{transform:translateY(0)}
+  .btn.accent{color:var(--ink);background:var(--accent);border-color:var(--accent);font-weight:500}
+  .btn.accent:hover{background:#d4ff5f}
+  .btn svg{width:13px;height:13px}
+  .spacer{flex:1}
+  .hint{font-family:"JetBrains Mono",monospace;font-size:10px;color:var(--txt-faint);letter-spacing:.02em}
+  .hint b{color:var(--txt-dim);font-weight:500}
+
+  /* ───────────────────────── canvas (grid of boxes) ───────────────────────── */
+  #canvas{
+    position:absolute;top:var(--shelf);left:0;right:0;bottom:0;
+    display:grid;padding:10px;gap:0;
+  }
+  .box{
+    position:relative;background:var(--ink-2);border:1px solid var(--line);
+    border-radius:var(--radius);overflow:hidden;
+    display:flex;flex-direction:column;min-width:0;min-height:0;
+    transition:border-color .18s,box-shadow .18s;
+  }
+  .box.focus{border-color:var(--accent-dim);box-shadow:0 0 0 1px var(--accent-dim),0 8px 40px -16px var(--accent)}
+
+  .rail{
+    height:var(--rail);min-height:var(--rail);
+    display:flex;align-items:center;gap:6px;padding:0 6px 0 10px;
+    background:var(--ink-3);border-bottom:1px solid var(--line);
+    opacity:.55;transition:opacity .18s;
+  }
+  .box:hover .rail,.box.focus .rail,.box.empty .rail{opacity:1}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--line-2);flex:none;transition:background .18s}
+  .box.focus .dot{background:var(--accent)}
+  .url{
+    flex:1;min-width:0;height:20px;border:none;background:transparent;color:var(--txt);
+    font-family:"JetBrains Mono",monospace;font-size:11.5px;outline:none;letter-spacing:-.01em;
+  }
+  .url::placeholder{color:var(--txt-faint)}
+  .ico{
+    width:22px;height:22px;border:none;background:transparent;border-radius:5px;cursor:pointer;
+    color:var(--txt-faint);display:inline-flex;align-items:center;justify-content:center;flex:none;
+    transition:color .14s,background .14s;
+  }
+  .ico:hover{color:var(--txt);background:var(--ink)}
+  .ico.danger:hover{color:#ff6b6b}
+  .ico svg{width:13px;height:13px}
+
+  .framewrap{flex:1;position:relative;background:#fff;min-height:0}
+  .framewrap iframe{width:100%;height:100%;border:none;display:block;background:#fff}
+
+  /* empty state */
+  .empty .framewrap{background:
+    radial-gradient(120% 120% at 50% 0%,var(--ink-3),var(--ink-2));
+    display:flex;align-items:center;justify-content:center}
+  .placeholder{text-align:center;color:var(--txt-faint);padding:18px;pointer-events:none}
+  .placeholder .glyph{
+    width:40px;height:40px;margin:0 auto 14px;border:1.5px dashed var(--line-2);border-radius:9px;
+    position:relative;
+  }
+  .placeholder .glyph::after{content:"+";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:22px;color:var(--txt-faint);font-weight:400}
+  .placeholder p{font-size:13.5px;color:var(--txt-dim);margin-bottom:3px;font-weight:600}
+  .placeholder span{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.02em}
+
+  /* loading shimmer + blocked overlay */
+  .veil{position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;
+    background:var(--ink-2);text-align:center;padding:20px;z-index:2}
+  .veil.show{display:flex}
+  .veil p{font-size:13px;color:var(--txt);font-weight:600;margin-bottom:4px}
+  .veil span{font-family:"JetBrains Mono",monospace;font-size:10.5px;color:var(--txt-faint);max-width:220px;line-height:1.5}
+  .veil .open{margin-top:14px}
+
+  /* ───────────────────────── gutters ───────────────────────── */
+  .gutter{
+    position:relative;z-index:10;display:flex;align-items:center;justify-content:center;
+  }
+  .gutter.col{cursor:col-resize}
+  .gutter.row{cursor:row-resize}
+  .gutter .grip{background:var(--line);border-radius:99px;transition:background .15s,box-shadow .15s}
+  .gutter.col .grip{width:3px;height:34px}
+  .gutter.row .grip{height:3px;width:34px}
+  .gutter:hover .grip,.gutter.drag .grip{background:var(--accent);box-shadow:0 0 10px -1px var(--accent)}
+
+  body.resizing{cursor:inherit}
+  body.resizing iframe{pointer-events:none}
+  body.resizing.cols{cursor:col-resize}
+  body.resizing.rows{cursor:row-resize}
+
+  /* toast */
+  #toast{
+    position:fixed;bottom:18px;left:50%;transform:translateX(-50%) translateY(20px);
+    background:var(--ink-3);border:1px solid var(--line-2);border-radius:9px;
+    padding:9px 16px;font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--txt);
+    opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:100;
+    box-shadow:0 12px 40px -12px #000;
+  }
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  #toast b{color:var(--accent);font-weight:500}
+</style>
+</head>
+<body>
+  <header class="shelf">
+    <div class="brand">
+      <div class="mark"></div>
+      <h1>boxed</h1>
+      <span class="tag">workspace</span>
+    </div>
+
+    <div class="sep"></div>
+
+    <div class="group">
+      <span class="lbl">layout</span>
+      <button class="preset" data-cols="1" data-rows="1" title="Single"><i style="grid-column:1/-1"></i></button>
+      <button class="preset p-2c" data-cols="2" data-rows="1" title="Side by side"><i></i><i></i></button>
+      <button class="preset p-2r" data-cols="1" data-rows="2" title="Stacked"><i></i><i></i></button>
+      <button class="preset p-3" data-cols="3" data-rows="1" title="Three across"><i></i><i></i><i></i></button>
+      <button class="preset p-4" data-cols="2" data-rows="2" title="Quad"><i></i><i></i><i></i><i></i></button>
+    </div>
+
+    <div class="sep"></div>
+
+    <div class="group">
+      <span class="lbl">grid</span>
+      <button class="btn" id="addCol" title="Add column">col +</button>
+      <button class="btn" id="addRow" title="Add row">row +</button>
+    </div>
+
+    <div class="spacer"></div>
+
+    <span class="hint">drag the <b>green gutters</b> to resize · ⌘/ctrl+enter to load a tab</span>
+
+    <div class="sep"></div>
+
+    <button class="btn" id="reset" title="Reset sizes">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v4h4"/></svg>
+      even
+    </button>
+    <button class="btn accent" id="save" title="Save this workspace">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3h11l3 3v15H5z"/><path d="M8 3v5h7"/><path d="M8 21v-7h8v7"/></svg>
+      save
+    </button>
+  </header>
+
+  <main id="canvas"></main>
+  <div id="toast"></div>
+
+<script>
+const STORE_KEY = "boxed.workspace.v1";
+
+const state = {
+  cols: [1, 1],
+  rows: [1],
+  tabs: {},        // "r-c" -> url
+  focus: null,
+};
+
+const canvas = document.getElementById("canvas");
+const toastEl = document.getElementById("toast");
+let toastT;
+
+function toast(html){
+  toastEl.innerHTML = html;
+  toastEl.classList.add("show");
+  clearTimeout(toastT);
+  toastT = setTimeout(()=>toastEl.classList.remove("show"), 1900);
+}
+
+function normalizeUrl(v){
+  v = v.trim();
+  if(!v) return "";
+  if(/^https?:\/\//i.test(v)) return v;
+  if(/^[\w-]+(\.[\w-]+)+/.test(v)) return "https://" + v;        // looks like a domain
+  return "https://duckduckgo.com/?q=" + encodeURIComponent(v);    // otherwise search it
+}
+
+/* ── render the whole grid ───────────────────────────────────────────── */
+function render(){
+  const C = state.cols.length, R = state.rows.length;
+
+  // interleave fr tracks with fixed gutter tracks
+  const colTpl = state.cols.map(f=>f+"fr").reduce((a,f,i)=> i? a+" var(--gutter) "+f : f, "");
+  const rowTpl = state.rows.map(f=>f+"fr").reduce((a,f,i)=> i? a+" var(--gutter) "+f : f, "");
+  canvas.style.gridTemplateColumns = colTpl;
+  canvas.style.gridTemplateRows = rowTpl;
+
+  canvas.innerHTML = "";
+
+  // boxes
+  for(let r=0;r<R;r++){
+    for(let c=0;c<C;c++){
+      canvas.appendChild(makeBox(r,c));
+    }
+  }
+  // column gutters (span all rows)
+  for(let c=0;c<C-1;c++){
+    const g = document.createElement("div");
+    g.className = "gutter col";
+    g.style.gridColumn = (2*c+2);
+    g.style.gridRow = "1 / -1";
+    g.innerHTML = '<div class="grip"></div>';
+    g.addEventListener("pointerdown", e=>startResize(e,"col",c));
+    canvas.appendChild(g);
+  }
+  // row gutters (span all cols)
+  for(let r=0;r<R-1;r++){
+    const g = document.createElement("div");
+    g.className = "gutter row";
+    g.style.gridRow = (2*r+2);
+    g.style.gridColumn = "1 / -1";
+    g.innerHTML = '<div class="grip"></div>';
+    g.addEventListener("pointerdown", e=>startResize(e,"row",r));
+    canvas.appendChild(g);
+  }
+  syncPresets();
+}
+
+function makeBox(r,c){
+  const key = r+"-"+c;
+  const url = state.tabs[key] || "";
+  const box = document.createElement("section");
+  box.className = "box" + (url ? "" : " empty");
+  box.style.gridColumn = (2*c+1);
+  box.style.gridRow = (2*r+1);
+  box.dataset.key = key;
+
+  box.innerHTML = `
+    <div class="rail">
+      <span class="dot"></span>
+      <input class="url" spellcheck="false" placeholder="enter a url…  (gmail.com, youtube.com, a doc…)" value="${escapeAttr(url)}">
+      <button class="ico reload" title="Reload">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v4h4"/></svg>
+      </button>
+      <button class="ico ext" title="Open in real browser tab">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
+      </button>
+      <button class="ico danger close" title="Clear this box">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="framewrap">
+      ${url ? `<iframe src="${escapeAttr(url)}" referrerpolicy="no-referrer"></iframe>`
+            : `<div class="placeholder"><div class="glyph"></div><p>empty box</p><span>type a url in the rail above</span></div>`}
+      <div class="veil">
+        <p>can't embed this one</p>
+        <span>some sites (google, instagram, x…) refuse to load inside a frame.</span>
+        <button class="btn open">open in a real tab ↗</button>
+      </div>
+    </div>`;
+
+  const input = box.querySelector(".url");
+  const wrap  = box.querySelector(".framewrap");
+  const veil  = box.querySelector(".veil");
+
+  function load(){
+    const v = normalizeUrl(input.value);
+    if(!v){ clearBox(key); return; }
+    input.value = v;
+    state.tabs[key] = v;
+    box.classList.remove("empty");
+    wrap.innerHTML = `<iframe src="${escapeAttr(v)}" referrerpolicy="no-referrer"></iframe>`
+                   + veil.outerHTML;
+    rebindVeil(box, v);
+    // crude block detection: if iframe never reports load, hint at it
+    const f = wrap.querySelector("iframe");
+    let loaded = false;
+    f.addEventListener("load", ()=>loaded=true);
+    setTimeout(()=>{ if(!loaded) box.querySelector(".veil").classList.add("show"); }, 3500);
+  }
+
+  input.addEventListener("keydown", e=>{
+    if(e.key==="Enter"){ load(); }
+    if(e.key==="Escape"){ input.blur(); }
+  });
+  box.addEventListener("pointerdown", ()=>setFocus(key), true);
+  input.addEventListener("focus", ()=>setFocus(key));
+
+  box.querySelector(".reload").addEventListener("click", ()=>{
+    const f = wrap.querySelector("iframe"); if(f) f.src = f.src;
+  });
+  box.querySelector(".ext").addEventListener("click", ()=>{
+    const v = normalizeUrl(input.value); if(v) window.open(v,"_blank");
+  });
+  box.querySelector(".close").addEventListener("click", ()=>clearBox(key));
+  rebindVeil(box, url);
+
+  if(state.focus===key) box.classList.add("focus");
+  return box;
+}
+
+function rebindVeil(box, url){
+  const open = box.querySelector(".veil .open");
+  if(open) open.onclick = ()=>{ if(url) window.open(url,"_blank"); };
+}
+
+function clearBox(key){
+  delete state.tabs[key];
+  render();
+}
+
+function setFocus(key){
+  state.focus = key;
+  document.querySelectorAll(".box").forEach(b=>b.classList.toggle("focus", b.dataset.key===key));
+}
+
+/* ── presets / grid edits ────────────────────────────────────────────── */
+function applyPreset(cols, rows){
+  state.cols = Array(cols).fill(1);
+  state.rows = Array(rows).fill(1);
+  render();
+}
+function syncPresets(){
+  document.querySelectorAll(".preset").forEach(p=>{
+    const on = (+p.dataset.cols===state.cols.length) && (+p.dataset.rows===state.rows.length)
+             && state.cols.every(f=>f===state.cols[0]) && state.rows.every(f=>f===state.rows[0]);
+    p.classList.toggle("on", on);
+  });
+}
+document.querySelectorAll(".preset").forEach(p=>{
+  p.addEventListener("click", ()=>applyPreset(+p.dataset.cols, +p.dataset.rows));
+});
+document.getElementById("addCol").onclick = ()=>{ state.cols.push(1); render(); };
+document.getElementById("addRow").onclick = ()=>{ state.rows.push(1); render(); };
+document.getElementById("reset").onclick = ()=>{
+  state.cols = state.cols.map(()=>1); state.rows = state.rows.map(()=>1); render();
+  toast("sizes <b>evened out</b>");
+};
+
+/* ── gutter resize ───────────────────────────────────────────────────── */
+function startResize(e, axis, idx){
+  e.preventDefault();
+  const arr = axis==="col" ? state.cols : state.rows;
+  const rect = canvas.getBoundingClientRect();
+  const total = axis==="col" ? rect.width : rect.height;
+  const startPos = axis==="col" ? e.clientX : e.clientY;
+  const a0 = arr[idx], b0 = arr[idx+1];
+  const sum = a0 + b0;
+  const frSum = arr.reduce((s,v)=>s+v,0);
+  const pxPerFr = total / frSum;
+
+  const gutter = e.currentTarget;
+  gutter.classList.add("drag");
+  document.body.classList.add("resizing", axis==="col"?"cols":"rows");
+
+  function move(ev){
+    const pos = axis==="col" ? ev.clientX : ev.clientY;
+    let dFr = (pos - startPos) / pxPerFr;
+    let a = a0 + dFr, b = b0 - dFr;
+    const min = sum * 0.08;
+    if(a < min){ a = min; b = sum - min; }
+    if(b < min){ b = min; a = sum - min; }
+    arr[idx] = a; arr[idx+1] = b;
+    if(axis==="col") canvas.style.gridTemplateColumns = state.cols.map(f=>f+"fr").reduce((acc,f,i)=> i? acc+" var(--gutter) "+f : f, "");
+    else canvas.style.gridTemplateRows = state.rows.map(f=>f+"fr").reduce((acc,f,i)=> i? acc+" var(--gutter) "+f : f, "");
+  }
+  function up(){
+    gutter.classList.remove("drag");
+    document.body.classList.remove("resizing","cols","rows");
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+  }
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+}
+
+/* ── persistence ─────────────────────────────────────────────────────── */
+document.getElementById("save").onclick = ()=>{
+  localStorage.setItem(STORE_KEY, JSON.stringify({
+    cols:state.cols, rows:state.rows, tabs:state.tabs
+  }));
+  toast("workspace <b>saved</b>");
+};
+function restore(){
+  try{
+    const s = JSON.parse(localStorage.getItem(STORE_KEY));
+    if(s && s.cols && s.rows){ state.cols=s.cols; state.rows=s.rows; state.tabs=s.tabs||{}; return true; }
+  }catch(e){}
+  return false;
+}
+
+/* ── utils ───────────────────────────────────────────────────────────── */
+function escapeAttr(s){ return String(s).replace(/"/g,"&quot;").replace(/</g,"&lt;"); }
+
+// ⌘/ctrl+enter loads the focused box's url even if input not focused-handled there
+document.addEventListener("keydown", e=>{
+  if((e.metaKey||e.ctrlKey) && e.key==="Enter" && state.focus){
+    const box = document.querySelector(`.box[data-key="${state.focus}"]`);
+    if(box){ const ev = new KeyboardEvent("keydown",{key:"Enter"}); box.querySelector(".url").dispatchEvent(ev); }
+  }
+});
+
+/* ── boot ────────────────────────────────────────────────────────────── */
+if(!restore()){ state.cols=[1,1]; state.rows=[1]; }
+render();
+</script>
+</body>
+</html>
