@@ -56,13 +56,16 @@ final class WindowManager {
   @discardableResult
   func organize() -> String? {
     guard let screen = NSScreen.main ?? NSScreen.screens.first else { return nil }
-    let windows = tileableWindows().filter {
+    let onScreen = tileableWindows().filter {
       frame(of: $0).map { screenContains(screen, $0) } ?? false
     }
-    guard !windows.isEmpty else {
+    guard !onScreen.isEmpty else {
       Log.write("organize: no windows to tile")
       return nil
     }
+    // Big windows take the primary slots; small windows fall into the stack.
+    let usable = usableRect(on: screen)
+    let windows = onScreen.filter { !isSmall($0, usable) } + onScreen.filter { isSmall($0, usable) }
     session = Session(
       windows: windows, screen: screen, layoutIndex: 0, order: Array(0..<windows.count))
     applySession()
@@ -162,9 +165,10 @@ final class WindowManager {
     let kinds = Tiling.layouts(for: count)
     guard !kinds.isEmpty else { return }
     let kind = kinds[s.layoutIndex % kinds.count]
-    let rects = Tiling.slots(kind, count: count, in: usableRect(on: s.screen), gap: gap)
+    let usable = usableRect(on: s.screen)
+    let rects = Tiling.slots(kind, count: count, in: usable, gap: gap)
     for slot in 0..<min(count, rects.count) {
-      setFrame(s.windows[s.order[slot]], rects[slot])
+      place(s.windows[s.order[slot]], in: rects[slot], usable: usable)
     }
     Log.write("applied \(Tiling.name(kind, count: count)) (count=\(count), order=\(s.order))")
   }
@@ -176,6 +180,12 @@ final class WindowManager {
     // (other Spaces, hidden helpers, zero-size ghosts) — counting those leaves a
     // gap in the layout. Cross-check against what's genuinely on screen right now.
     let visible = onScreenWindows()
+    Log.write(
+      "on-screen: "
+        + (visible.isEmpty
+          ? "none"
+          : visible.map { "[\(appName($0.pid))] \(rectStr($0.frame))" }.joined(separator: " ")))
+
     var result: [AXUIElement] = []
     var rawCount = 0
 
@@ -184,6 +194,7 @@ final class WindowManager {
     }
     for app in apps {
       let pid = app.processIdentifier
+      let name = app.localizedName ?? "pid \(pid)"
       let appElement = AXUIElementCreateApplication(pid)
       var value: CFTypeRef?
       guard
@@ -193,12 +204,25 @@ final class WindowManager {
       else { continue }
       for window in windows where isTileable(window) {
         rawCount += 1
-        guard let f = frame(of: window), isVisible(f, pid: pid, in: visible) else { continue }
-        result.append(window)
+        let f = frame(of: window)
+        if let f, isVisible(f, pid: pid, in: visible) {
+          result.append(window)
+          Log.write("  keep [\(name)] \(rectStr(f))")
+        } else {
+          Log.write("  drop [\(name)] \(f.map(rectStr) ?? "no-frame")")
+        }
       }
     }
-    Log.write("tileable windows: \(result.count) visible (of \(rawCount) AX-standard)")
+    Log.write("tileable windows: \(result.count) of \(rawCount)")
     return result
+  }
+
+  private func rectStr(_ r: CGRect) -> String {
+    "(\(Int(r.minX)),\(Int(r.minY)) \(Int(r.width))×\(Int(r.height)))"
+  }
+
+  private func appName(_ pid: pid_t) -> String {
+    NSRunningApplication(processIdentifier: pid)?.localizedName ?? "pid \(pid)"
   }
 
   /// Windows actually rendered on the current Space, from the window server.
@@ -228,7 +252,15 @@ final class WindowManager {
     -> Bool
   {
     let center = CGPoint(x: axFrame.midX, y: axFrame.midY)
-    return visible.contains { $0.pid == pid && $0.frame.insetBy(dx: -2, dy: -2).contains(center) }
+    for v in visible where v.pid == pid {
+      if v.frame.insetBy(dx: -2, dy: -2).contains(center) { return true }
+      // Overlap fallback: same app and the window clearly overlaps a visible one.
+      let inter = v.frame.intersection(axFrame)
+      if !inter.isNull, inter.width * inter.height > 0.5 * axFrame.width * axFrame.height {
+        return true
+      }
+    }
+    return false
   }
 
   private func isTileable(_ window: AXUIElement) -> Bool {
@@ -262,20 +294,31 @@ final class WindowManager {
     return CGRect(origin: point, size: size)
   }
 
-  /// Place a window in its slot. Windows that allow resizing fill the slot;
-  /// fixed/size-capped windows (media players, fixed dialogs) keep their natural
-  /// size and just anchor to the slot's top-left, so the leftover space falls to
-  /// the bottom-right instead of leaving a stretched window.
-  private func setFrame(_ window: AXUIElement, _ rect: CGRect) {
-    setPosition(window, rect.origin)
-    guard isSizeSettable(window) else {
-      Log.write("fixed-size window kept natural size, anchored top-left")
+  /// Place a window in its slot. Big, resizable windows fill the slot. Windows that
+  /// are fixed-size, or "small" by default (under half the screen in BOTH width and
+  /// height), keep their natural size and tuck into the slot's top-right — leaving
+  /// the bottom-right empty instead of stretching a small window to fill.
+  private func place(_ window: AXUIElement, in slot: CGRect, usable: CGRect) {
+    let current = frame(of: window)?.size
+    let settable = isSizeSettable(window)
+    let small =
+      current.map { $0.width < usable.width * 0.5 && $0.height < usable.height * 0.5 } ?? false
+
+    if let size = current, !settable || small {
+      // Anchor to the slot's top-right (AX origin is top-left, so top == minY).
+      let x = max(slot.minX, slot.maxX - size.width)
+      setPosition(window, CGPoint(x: x, y: slot.minY))
+      Log.write("kept natural \(Int(size.width))×\(Int(size.height)) (small/fixed), top-right")
       return
     }
-    setSize(window, rect.size)
-    // Some apps recenter when resized; re-anchor so any capped leftover is
-    // bottom-right, not centered.
-    setPosition(window, rect.origin)
+    setPosition(window, slot.origin)
+    setSize(window, slot.size)
+    setPosition(window, slot.origin)  // re-anchor for apps that recenter on resize
+  }
+
+  private func isSmall(_ window: AXUIElement, _ usable: CGRect) -> Bool {
+    guard let size = frame(of: window)?.size else { return false }
+    return size.width < usable.width * 0.5 && size.height < usable.height * 0.5
   }
 
   private func setPosition(_ window: AXUIElement, _ origin: CGPoint) {
