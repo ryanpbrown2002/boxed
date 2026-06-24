@@ -26,6 +26,13 @@ final class WindowManager {
 
   private var observers: [pid_t: AXObserver] = [:]
   private var reflowPending = false
+  /// A window's "natural" size: recorded at creation (before boxed tiles it) and
+  /// updated when the user manually resizes it — never from boxed's own tiling.
+  /// Used to decide whether a window fills its slot or stays small.
+  private var naturalSizes: [(window: AXUIElement, size: CGSize)] = []
+  /// Windows boxed just resized, so the resulting resize echo isn't mistaken for a
+  /// user resize. (window, ignore-until).
+  private var recentlySized: [(window: AXUIElement, until: DispatchTime)] = []
 
   private struct Session {
     var windows: [AXUIElement]
@@ -66,6 +73,7 @@ final class WindowManager {
   }
 
   func handleWindowCreated(_ window: AXUIElement) {
+    recordNatural(window)  // capture the app's opening size, before boxed tiles it
     // A newly-opened window should come to the front, never hide behind tiles.
     if isTileable(window) {
       AXUIElementPerformAction(window, kAXRaiseAction as CFString)
@@ -636,11 +644,46 @@ final class WindowManager {
   /// fill/keep decision is the pure, tested `Tiling.placement`.
   private func place(_ window: AXUIElement, in slot: CGRect) {
     let resizable = isSizeSettable(window)
-    let natural = frame(of: window)?.size ?? slot.size
-    let target = Tiling.placement(slot: slot, natural: natural, resizable: resizable)
+    let target = Tiling.placement(slot: slot, natural: naturalSize(of: window), resizable: resizable)
     setPosition(window, target.origin)
     if resizable { setSize(window, target.size) }
     setPosition(window, target.origin)  // re-anchor for apps that recenter on resize
+  }
+
+  // MARK: - Natural sizes
+
+  /// Record a window's natural size once (at creation), if not already known.
+  private func recordNatural(_ window: AXUIElement) {
+    guard !naturalSizes.contains(where: { CFEqual($0.window, window) }),
+      let size = frame(of: window)?.size
+    else { return }
+    naturalSizes.append((window, size))
+  }
+
+  /// The recorded natural size, or .zero (unknown → fill) if we never saw it open.
+  private func naturalSize(of window: AXUIElement) -> CGSize {
+    naturalSizes.first(where: { CFEqual($0.window, window) })?.size ?? .zero
+  }
+
+  /// The user manually resized a window — treat its new size as preferred.
+  func handleWindowResized(_ window: AXUIElement) {
+    guard !wasRecentlySized(window), let size = frame(of: window)?.size else { return }
+    if let i = naturalSizes.firstIndex(where: { CFEqual($0.window, window) }) {
+      naturalSizes[i].size = size
+    } else {
+      naturalSizes.append((window, size))
+    }
+    Log.write("user resized -> natural \(Int(size.width))×\(Int(size.height))")
+  }
+
+  private func markSized(_ window: AXUIElement) {
+    recentlySized.append((window, .now() + .milliseconds(350)))
+  }
+
+  private func wasRecentlySized(_ window: AXUIElement) -> Bool {
+    let now = DispatchTime.now()
+    recentlySized.removeAll { $0.until < now }
+    return recentlySized.contains { CFEqual($0.window, window) }
   }
 
   private func windowArea(_ window: AXUIElement) -> CGFloat {
@@ -656,6 +699,7 @@ final class WindowManager {
   }
 
   private func setSize(_ window: AXUIElement, _ size: CGSize) {
+    markSized(window)  // so the resulting resize echo isn't read as a user resize
     var s = size
     if let value = AXValueCreate(.cgSize, &s) {
       AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, value)
@@ -717,6 +761,9 @@ final class WindowManager {
         }
       } else if note == (kAXUIElementDestroyedNotification as String) {
         DispatchQueue.main.async { manager.handleWindowClosed() }
+      } else if note == (kAXWindowResizedNotification as String) {
+        let window = element
+        DispatchQueue.main.async { manager.handleWindowResized(window) }
       }
     }
     guard AXObserverCreate(pid, callback, &observer) == .success, let observer else { return }
@@ -726,6 +773,8 @@ final class WindowManager {
     AXObserverAddNotification(observer, appElement, kAXWindowCreatedNotification as CFString, refcon)
     AXObserverAddNotification(
       observer, appElement, kAXUIElementDestroyedNotification as CFString, refcon)
+    AXObserverAddNotification(
+      observer, appElement, kAXWindowResizedNotification as CFString, refcon)
     CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
     observers[pid] = observer
   }
