@@ -55,25 +55,54 @@ public enum Tiling {
       && size.height < screen.height * compactFraction
   }
 
+  /// Smallest fraction either side of an adjustable split may shrink to.
+  public static let minRatio: CGFloat = 0.1
+
+  /// Clamp a split ratio so neither side collapses.
+  public static func clampRatio(_ r: CGFloat) -> CGFloat {
+    min(max(r, minRatio), 1 - minRatio)
+  }
+
   /// The ordered slot rectangles for `count` windows under `kind`, within `rect`,
   /// separated by `gap`. Always returns exactly `count` rects.
-  public static func slots(_ kind: LayoutKind, count: Int, in rect: CGRect, gap: CGFloat = 8)
-    -> [CGRect]
-  {
+  ///
+  /// `ratio` sizes the layout's *primary* split (the draggable edge): the
+  /// left/right divide for Left-Right, top/bottom for Top-Bottom, and the
+  /// main-vs-stack divide for Main + stack / row. It's ignored by layouts without
+  /// a single primary split (even Columns/Rows of 3+, Grid, BSP).
+  public static func slots(
+    _ kind: LayoutKind, count: Int, in rect: CGRect, gap: CGFloat = 8, ratio: CGFloat = 0.5
+  ) -> [CGRect] {
     guard count > 0, rect.width > 0, rect.height > 0 else { return [] }
     switch kind {
     case .bsp:
       return Layout.bsp(count: count, in: rect, gap: gap)  // already gap-inset
     case .columns:
-      return inset(columns(count, rect), by: gap)
+      return inset(count == 2 ? twoSplit(rect, ratio: ratio, vertical: true) : columns(count, rect), by: gap)
     case .rows:
-      return inset(rows(count, rect), by: gap)
+      return inset(count == 2 ? twoSplit(rect, ratio: ratio, vertical: false) : rows(count, rect), by: gap)
     case .grid:
       return inset(grid(count, rect), by: gap)
     case .mainLeft:
-      return inset(mainLeft(count, rect), by: gap)
+      return inset(mainLeft(count, rect, ratio: ratio), by: gap)
     case .mainTop:
-      return inset(mainTop(count, rect), by: gap)
+      return inset(mainTop(count, rect, ratio: ratio), by: gap)
+    }
+  }
+
+  static func twoSplit(_ r: CGRect, ratio: CGFloat, vertical: Bool) -> [CGRect] {
+    if vertical {
+      let w = r.width * ratio
+      return [
+        CGRect(x: r.minX, y: r.minY, width: w, height: r.height),
+        CGRect(x: r.minX + w, y: r.minY, width: r.width - w, height: r.height)
+      ]
+    } else {
+      let h = r.height * ratio
+      return [
+        CGRect(x: r.minX, y: r.minY, width: r.width, height: h),
+        CGRect(x: r.minX, y: r.minY + h, width: r.width, height: r.height - h)
+      ]
     }
   }
 
@@ -105,24 +134,24 @@ public enum Tiling {
     }
   }
 
-  static func mainLeft(_ n: Int, _ r: CGRect) -> [CGRect] {
+  static func mainLeft(_ n: Int, _ r: CGRect, ratio: CGFloat = 0.5) -> [CGRect] {
     guard n > 1 else { return [r] }
-    let half = r.width / 2
-    var out = [CGRect(x: r.minX, y: r.minY, width: half, height: r.height)]
+    let mainW = r.width * ratio
+    var out = [CGRect(x: r.minX, y: r.minY, width: mainW, height: r.height)]
     let h = r.height / CGFloat(n - 1)
     for j in 0..<(n - 1) {
-      out.append(CGRect(x: r.minX + half, y: r.minY + CGFloat(j) * h, width: r.width - half, height: h))
+      out.append(CGRect(x: r.minX + mainW, y: r.minY + CGFloat(j) * h, width: r.width - mainW, height: h))
     }
     return out
   }
 
-  static func mainTop(_ n: Int, _ r: CGRect) -> [CGRect] {
+  static func mainTop(_ n: Int, _ r: CGRect, ratio: CGFloat = 0.5) -> [CGRect] {
     guard n > 1 else { return [r] }
-    let half = r.height / 2
-    var out = [CGRect(x: r.minX, y: r.minY, width: r.width, height: half)]
+    let mainH = r.height * ratio
+    var out = [CGRect(x: r.minX, y: r.minY, width: r.width, height: mainH)]
     let w = r.width / CGFloat(n - 1)
     for j in 0..<(n - 1) {
-      out.append(CGRect(x: r.minX + CGFloat(j) * w, y: r.minY + half, width: w, height: r.height - half))
+      out.append(CGRect(x: r.minX + CGFloat(j) * w, y: r.minY + mainH, width: w, height: r.height - mainH))
     }
     return out
   }

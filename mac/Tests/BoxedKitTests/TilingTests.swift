@@ -20,6 +20,32 @@ final class TilingTests: XCTestCase {
     XCTAssertFalse(Tiling.isCompact(CGSize(width: 1600, height: 200), in: screen))
   }
 
+  // MARK: adjustable primary split (draggable edge)
+
+  func testRatioAwarePrimarySplit() {
+    let r = CGRect(x: 0, y: 0, width: 1000, height: 600)
+    // Left/Right at 0.6 → left 600, right 400 meeting at x=600.
+    let lr = Tiling.slots(.columns, count: 2, in: r, gap: 0, ratio: 0.6)
+    XCTAssertEqual(lr[0].width, 600, accuracy: 0.001)
+    XCTAssertEqual(lr[1].width, 400, accuracy: 0.001)
+    XCTAssertEqual(lr[1].minX, 600, accuracy: 0.001)
+    // Top/Bottom at 0.7 → top 420, bottom 180.
+    let tb = Tiling.slots(.rows, count: 2, in: r, gap: 0, ratio: 0.7)
+    XCTAssertEqual(tb[0].height, 420, accuracy: 0.001)
+    XCTAssertEqual(tb[1].height, 180, accuracy: 0.001)
+    // Main + stack at 0.65 → main width 650.
+    let m = Tiling.slots(.mainLeft, count: 3, in: r, gap: 0, ratio: 0.65)
+    XCTAssertEqual(m[0].width, 650, accuracy: 0.001)
+    // Default (no ratio) stays an even split.
+    XCTAssertEqual(Tiling.slots(.columns, count: 2, in: r, gap: 0)[0].width, 500, accuracy: 0.001)
+  }
+
+  func testClampRatio() {
+    XCTAssertEqual(Tiling.clampRatio(0.5), 0.5, accuracy: 0.001)
+    XCTAssertEqual(Tiling.clampRatio(0.001), Tiling.minRatio, accuracy: 0.001)  // floored
+    XCTAssertEqual(Tiling.clampRatio(0.999), 1 - Tiling.minRatio, accuracy: 0.001)  // capped
+  }
+
   // MARK: which layouts are offered per count
 
   func testLayoutsPerCount() {

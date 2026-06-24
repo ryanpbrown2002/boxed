@@ -36,8 +36,15 @@ final class WindowManager {
     var screen: NSScreen
     var layoutIndex: Int
     var order: [Int]  // order[slot] = index into `windows`
+    var ratio: CGFloat = 0.5  // primary split fraction (the draggable edge)
   }
   private var session: Session?
+
+  /// A divider was dragged this session, so the next mouse-up should snap clean.
+  private var ratioDirty = false
+  /// Windows boxed just resized, so their resize echoes can be ignored (vs. a
+  /// genuine user drag). Pairs of (window, ignore-until).
+  private var recentlySized: [(window: AXUIElement, until: DispatchTime)] = []
 
   func start() {
     let nc = NSWorkspace.shared.notificationCenter
@@ -57,6 +64,11 @@ final class WindowManager {
 
   func handleWindowCreated(_ window: AXUIElement) {
     _ = naturalSize(of: window)  // record its opening size before anything tiles it
+    // A newly-opened window should come to the front, never hide behind tiles.
+    if isTileable(window) {
+      AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+      Log.write("raised new window to front")
+    }
     // In edit mode, a new window should just slot into the current layout.
     if editMode {
       Log.write("new window during edit mode -> reflow")
@@ -99,7 +111,7 @@ final class WindowManager {
     let keepLayout = windows.count == old.windows.count
     session = Session(
       windows: windows, screen: screen, layoutIndex: keepLayout ? old.layoutIndex : 0,
-      order: Array(0..<windows.count))
+      order: Array(0..<windows.count), ratio: keepLayout ? old.ratio : 0.5)
     applySession()
     if let name = currentLayoutName() { onReorganized?(name) }
   }
@@ -159,7 +171,7 @@ final class WindowManager {
     let kinds = Tiling.layouts(for: count)
     guard !kinds.isEmpty else { return nil }
     let kind = kinds[s.layoutIndex % kinds.count]
-    let rects = Tiling.slots(kind, count: count, in: usableRect(on: s.screen), gap: gap)
+    let rects = Tiling.slots(kind, count: count, in: usableRect(on: s.screen), gap: gap, ratio: s.ratio)
     guard rects.count == count else { return nil }
 
     let centers = (0..<count).map { slot in
@@ -179,7 +191,15 @@ final class WindowManager {
         from = slot
       }
     }
-    guard let from, let dropped = centers[from] else { return nil }
+    guard let from, let dropped = centers[from] else {
+      // Not a move/swap. If a divider was dragged, snap everything clean.
+      if ratioDirty {
+        ratioDirty = false
+        applySession()
+        return currentLayoutName()
+      }
+      return nil
+    }
 
     // Nearest other slot to where it was dropped.
     var to: Int?
@@ -207,6 +227,56 @@ final class WindowManager {
     return currentLayoutName()
   }
 
+  /// While in edit mode, the user resized a tiled window. If that window owns one
+  /// side of the layout's primary split (Left/Right, Top/Bottom, or Main+stack),
+  /// treat the dragged edge as the divider and slide the other side(s) to meet it —
+  /// VS Code-style. The dragged window is left exactly where the user put it.
+  func handleWindowResized(_ window: AXUIElement) {
+    guard editMode, let s = session, !wasRecentlySized(window) else { return }
+    let count = s.windows.count
+    let kinds = Tiling.layouts(for: count)
+    guard !kinds.isEmpty else { return }
+    let kind = kinds[s.layoutIndex % kinds.count]
+
+    let vertical: Bool
+    switch kind {
+    case .columns where count == 2, .mainLeft: vertical = true
+    case .rows where count == 2, .mainTop: vertical = false
+    default: return  // no single draggable primary split
+    }
+
+    guard
+      let slot = (0..<count).first(where: { CFEqual(s.windows[s.order[$0]], window) }),
+      let f = frame(of: window)
+    else { return }
+    let usable = usableRect(on: s.screen)
+
+    // The divider is the edge of this window that faces the split.
+    var ratio: CGFloat
+    if vertical {
+      ratio = slot == 0 ? (f.maxX - usable.minX) / usable.width : (f.minX - usable.minX) / usable.width
+    } else {
+      ratio = slot == 0 ? (f.maxY - usable.minY) / usable.height : (f.minY - usable.minY) / usable.height
+    }
+    ratio = Tiling.clampRatio(ratio)
+    guard abs(ratio - s.ratio) > 0.004 else { return }
+
+    var next = s
+    next.ratio = ratio
+    session = next
+    ratioDirty = true
+
+    // Move every OTHER window to meet the new divider; don't touch the dragged one.
+    let rects = Tiling.slots(kind, count: count, in: usable, gap: gap, ratio: ratio)
+    for other in 0..<count where other != slot {
+      let w = s.windows[s.order[other]]
+      setPosition(w, rects[other].origin)
+      setSize(w, rects[other].size)
+      setPosition(w, rects[other].origin)
+    }
+    Log.write("edge drag -> ratio \(String(format: "%.2f", ratio))")
+  }
+
   func currentLayoutName() -> String? {
     guard let s = session else { return nil }
     let kinds = Tiling.layouts(for: s.windows.count)
@@ -221,7 +291,7 @@ final class WindowManager {
     guard !kinds.isEmpty else { return }
     let kind = kinds[s.layoutIndex % kinds.count]
     let usable = usableRect(on: s.screen)
-    let rects = Tiling.slots(kind, count: count, in: usable, gap: gap)
+    let rects = Tiling.slots(kind, count: count, in: usable, gap: gap, ratio: s.ratio)
     for slot in 0..<min(count, rects.count) {
       place(s.windows[s.order[slot]], in: rects[slot], usable: usable)
     }
@@ -389,10 +459,21 @@ final class WindowManager {
   }
 
   private func setSize(_ window: AXUIElement, _ size: CGSize) {
+    markSized(window)  // so the resulting resize echo isn't read as a user drag
     var s = size
     if let value = AXValueCreate(.cgSize, &s) {
       AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, value)
     }
+  }
+
+  private func markSized(_ window: AXUIElement) {
+    recentlySized.append((window, .now() + .milliseconds(300)))
+  }
+
+  private func wasRecentlySized(_ window: AXUIElement) -> Bool {
+    let now = DispatchTime.now()
+    recentlySized.removeAll { $0.until < now }
+    return recentlySized.contains { CFEqual($0.window, window) }
   }
 
   private func isSizeSettable(_ window: AXUIElement) -> Bool {
@@ -449,6 +530,9 @@ final class WindowManager {
         }
       } else if note == (kAXUIElementDestroyedNotification as String) {
         DispatchQueue.main.async { manager.handleWindowClosed() }
+      } else if note == (kAXWindowResizedNotification as String) {
+        let window = element
+        DispatchQueue.main.async { manager.handleWindowResized(window) }
       }
     }
     guard AXObserverCreate(pid, callback, &observer) == .success, let observer else { return }
@@ -458,6 +542,8 @@ final class WindowManager {
     AXObserverAddNotification(observer, appElement, kAXWindowCreatedNotification as CFString, refcon)
     AXObserverAddNotification(
       observer, appElement, kAXUIElementDestroyedNotification as CFString, refcon)
+    AXObserverAddNotification(
+      observer, appElement, kAXWindowResizedNotification as CFString, refcon)
     CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
     observers[pid] = observer
   }

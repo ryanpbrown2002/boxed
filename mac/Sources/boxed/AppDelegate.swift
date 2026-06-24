@@ -63,14 +63,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       self.showAdjustPill(layoutName: self.manager.rebox() ?? layoutName)
     }
     suggestionPanel.present(
-      title: layoutName, [swap, rebox], near: topCenterAnchor(), prominent: true)
+      title: layoutName, [swap, rebox], near: bottomCenterAnchor(), prominent: true)
   }
 
-  /// A point at the top-center of the active display. The panel clamps just below
-  /// the menu bar from here.
-  private func topCenterAnchor() -> CGRect {
+  /// A point at the bottom-center of the active display — keeps the pill clear of
+  /// windows' top-right title-bar buttons.
+  private func bottomCenterAnchor() -> CGRect {
     let vf = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? .zero
-    return CGRect(x: vf.midX, y: vf.maxY, width: 0, height: 0)
+    return CGRect(x: vf.midX, y: vf.minY + 64, width: 0, height: 0)
   }
 
   // MARK: - Drag-to-swap (only while the adjust pill is up)
