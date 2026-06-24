@@ -15,17 +15,28 @@ out of the way.
 
 ## Status
 
-**Phase 1 — embedded web tabs (in progress).** Each box hosts a real web page via
-Electron's `<webview>`, so unlike a browser iframe there are no embedding
-restrictions — any site loads. Logins persist across sessions.
+boxed is a **native macOS tiling window manager** ([`mac/`](mac/)). It arranges
+your *real* app windows — it doesn't contain anything. Open a window and it fits
+into the layout; close one and the survivors reflow to reclaim the space. This is
+the thing: maximize your screen, integrate new windows automatically, never
+manually drag-snap again.
 
-**Phase 2 — native window tiling (planned).** Tile *real* macOS app windows
-(VSCode, Spotify, Chrome) into a saved layout. This requires the macOS
-Accessibility APIs and is tracked as a separate effort.
+**Phase 1 — in progress (Tier 1, Accessibility only):** BSP auto-tiling of the
+active display, live reflow on window open/close, menubar agent, re-tile hotkey.
+No SIP changes required.
 
-A standalone, dependency-free HTML proof-of-concept lives in
-[`prototype/index.html`](prototype/index.html) — open it in any browser to see the
-original layout idea (it uses iframes, so some sites refuse to embed).
+**Phase 2 — later (opt-in):** multi-Space / multi-display orchestration, which
+needs a partial SIP disable (the `yabai` tier). Not started.
+
+### Two earlier explorations live in the repo (parked, not deleted)
+
+- [`mac/`](mac/) is the real product (Swift, below).
+- The **Electron app** at the repo root was an earlier "container" approach —
+  embedding web pages in a single window. It's parked because it's a different
+  product (a fancy browser, not a window manager). Kept for reference / possible
+  config-UI reuse.
+- A dependency-free HTML proof-of-concept of the layout idea is in
+  [`prototype/index.html`](prototype/index.html).
 
 ---
 

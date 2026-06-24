@@ -57,14 +57,33 @@ smoke test in `tests/e2e`.
   is expected here, but still confirm the commit message intent if ambiguous.
 - Never commit `out/`, `release/`, or `node_modules/` (see `.gitignore`).
 
+## Direction (read this — the project pivoted)
+
+boxed is now a **native macOS tiling window manager** in [`mac/`](mac/) (Swift). It
+arranges the user's *real* OS windows; it does not embed anything. The Electron app
+at the repo root is **parked** — an earlier "container" approach — kept for
+reference but not the active product. Don't add features to it without being asked.
+
+For the native app:
+
+- Pure tiling math lives in `mac/Sources/boxed/Layout.swift` — no window/AppKit
+  APIs in there, so it stays testable. Keep it that way.
+- All window manipulation goes through the Accessibility API in `WindowManager`.
+- It's a menubar agent (`LSUIElement`, `.accessory` activation) — no dock icon,
+  no main window. Keep it that way; "gets out of the way" still rules.
+- Build with `cd mac && ./scripts/make-app.sh`. Verify `swift build` compiles
+  before committing. Verify layout math with a standalone `swiftc` check (full
+  Xcode isn't installed, so `swift test`/XCTest won't run here).
+
 ## Roadmap guardrails
 
-- **Phase 1 (now):** embedded web tabs, layout presets, gutter resize, save/restore,
-  menubar + hotkey. Make this feel great.
-- **Phase 2 (later):** native macOS window tiling via Accessibility APIs. This is a
-  separate, harder track — do NOT start it without explicit direction.
-- Packaging/signing/notarization config is stubbed in `electron-builder.yml`;
-  leave it until the user wants distributable builds.
+- **Phase 1 (now):** Tier 1 — Accessibility only. BSP auto-tiling of the active
+  display, live reflow on open/close, menubar + hotkey. Make it feel great.
+- **Phase 2 (later, opt-in):** multi-Space / multi-display orchestration, which
+  needs a partial SIP disable (the yabai tier). Do NOT pursue without explicit
+  direction — it's a system-wide security change.
+- Electron packaging/signing config in `electron-builder.yml` is dormant; ignore
+  unless the parked Electron app is explicitly revived.
 
 ## Known rough edges to fix as we go
 

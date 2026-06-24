@@ -10,3 +10,9 @@ playwright-report
 test-results
 *.local
 .env
+
+# Swift / native
+mac/.build
+mac/boxed.app
+*.swiftpm
+.swiftpm
