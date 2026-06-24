@@ -18,10 +18,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     manager.onNewWindow = { [weak self] anchor in
       self?.showOrganizePill(near: anchor)
     }
-    // Drag-to-swap is only live while the adjust pill is on screen.
-    suggestionPanel.onDismiss = { [weak self] in self?.endDragSwap() }
+    // Drag-to-swap and auto-reflow are only live while the adjust pill is up.
+    suggestionPanel.onDismiss = { [weak self] in
+      self?.manager.editMode = false
+      self?.endDragSwap()
+    }
+    // When a window opens/closes during edit mode, re-tile and refresh the pill.
+    manager.onReorganized = { [weak self] name in self?.showAdjustPill(layoutName: name) }
     manager.start()
     installShortcuts()
+    startCommandHook()
   }
 
   // MARK: - The organize flow
@@ -46,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   /// Swap rotates which window sits where; Rebox cycles to the next layout. Each
   /// press re-tiles and refreshes the pill (resetting its fade timer).
   private func showAdjustPill(layoutName: String) {
+    manager.editMode = true
     beginDragSwap()
     let swap = WindowSuggestion(label: "⇄ Swap", keepsPanelOpen: true) { [weak self] in
       guard let self else { return }
@@ -89,6 +96,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     NSEvent.removeMonitor(monitor)
     dragSwapMonitor = nil
     Log.write("drag-swap disabled")
+  }
+
+  // MARK: - Test hook (dev only)
+
+  /// Polls /tmp/boxed-cmd so a script can drive boxed for automated testing:
+  ///   echo organize > /tmp/boxed-cmd   (also: rebox, swap, dismiss)
+  /// Lets changes be exercised against real windows without manual clicks.
+  private func startCommandHook() {
+    let path = "/tmp/boxed-cmd"
+    Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
+      guard let self,
+        let raw = try? String(contentsOfFile: path, encoding: .utf8)
+      else { return }
+      let cmd = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !cmd.isEmpty else { return }
+      try? "".write(toFile: path, atomically: true, encoding: .utf8)
+      Log.write("cmd: \(cmd)")
+      switch cmd {
+      case "organize": self.organizeAndAdjust()
+      case "rebox": if let name = self.manager.rebox() { self.showAdjustPill(layoutName: name) }
+      case "swap": if let name = self.manager.swap() { self.showAdjustPill(layoutName: name) }
+      case "dismiss": self.suggestionPanel.dismiss()
+      default: break
+      }
+    }
   }
 
   // MARK: - Menubar

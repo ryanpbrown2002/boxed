@@ -17,7 +17,19 @@ final class WindowManager {
   /// window's frame in Cocoa (bottom-left) coordinates.
   var onNewWindow: ((_ anchor: CGRect) -> Void)?
 
+  /// True while the adjust pill is showing ("edit mode"). When set, opening or
+  /// closing a window automatically re-tiles instead of offering a fresh prompt.
+  var editMode = false
+
+  /// Called after an automatic re-tile (edit mode) so the adjust pill can refresh.
+  var onReorganized: ((_ layoutName: String) -> Void)?
+
   private var observers: [pid_t: AXObserver] = [:]
+  private var reflowPending = false
+  /// Each window's size the first time we saw it — its "natural" size, before
+  /// boxed ever tiled it. Used to decide "small" so a window tiled into a small
+  /// slot isn't later mistaken for a naturally-small one.
+  private var naturalSizes: [(window: AXUIElement, size: CGSize)] = []
 
   private struct Session {
     var windows: [AXUIElement]
@@ -44,9 +56,52 @@ final class WindowManager {
   }
 
   func handleWindowCreated(_ window: AXUIElement) {
+    _ = naturalSize(of: window)  // record its opening size before anything tiles it
+    // In edit mode, a new window should just slot into the current layout.
+    if editMode {
+      Log.write("new window during edit mode -> reflow")
+      scheduleReflow()
+      return
+    }
     guard suggestNewWindows, isTileable(window), let newFrame = frame(of: window) else { return }
     Log.write("new window -> offering organize")
     onNewWindow?(axToCocoa(newFrame))
+  }
+
+  /// A window (or other UI element) was destroyed. Only relevant in edit mode,
+  /// where a closed window should make the rest re-tile to fill the gap.
+  func handleWindowClosed() {
+    guard editMode, session != nil else { return }
+    scheduleReflow()
+  }
+
+  /// Re-capture the windows on the active display and re-apply, coalescing bursts
+  /// of open/close events. Keeps the current layout if the count is unchanged,
+  /// otherwise falls back to that count's default.
+  private func scheduleReflow() {
+    guard !reflowPending else { return }
+    reflowPending = true
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+      self?.reflowPending = false
+      self?.reflow()
+    }
+  }
+
+  private func reflow() {
+    guard let old = session else { return }
+    let screen = old.screen
+    let onScreen = tileableWindows().filter {
+      frame(of: $0).map { screenContains(screen, $0) } ?? false
+    }
+    guard !onScreen.isEmpty else { return }
+    let usable = usableRect(on: screen)
+    let windows = onScreen.filter { !isSmall($0, usable) } + onScreen.filter { isSmall($0, usable) }
+    let keepLayout = windows.count == old.windows.count
+    session = Session(
+      windows: windows, screen: screen, layoutIndex: keepLayout ? old.layoutIndex : 0,
+      order: Array(0..<windows.count))
+    applySession()
+    if let name = currentLayoutName() { onReorganized?(name) }
   }
 
   // MARK: - Organize session
@@ -252,21 +307,15 @@ final class WindowManager {
     -> Bool
   {
     let center = CGPoint(x: axFrame.midX, y: axFrame.midY)
-    for v in visible where v.pid == pid {
-      if v.frame.insetBy(dx: -2, dy: -2).contains(center) { return true }
-      // Overlap fallback: same app and the window clearly overlaps a visible one.
-      let inter = v.frame.intersection(axFrame)
-      if !inter.isNull, inter.width * inter.height > 0.5 * axFrame.width * axFrame.height {
-        return true
-      }
-    }
-    return false
+    return visible.contains { $0.pid == pid && $0.frame.insetBy(dx: -2, dy: -2).contains(center) }
   }
 
   private func isTileable(_ window: AXUIElement) -> Bool {
+    // Require a real standard window subrole — this excludes the Finder desktop,
+    // panels, sheets, and other non-window elements that have no/!standard subrole.
     var subrole: CFTypeRef?
     AXUIElementCopyAttributeValue(window, kAXSubroleAttribute as CFString, &subrole)
-    if let s = subrole as? String, s != (kAXStandardWindowSubrole as String) { return false }
+    guard let s = subrole as? String, s == (kAXStandardWindowSubrole as String) else { return false }
 
     var minimized: CFTypeRef?
     AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minimized)
@@ -299,16 +348,19 @@ final class WindowManager {
   /// height), keep their natural size and tuck into the slot's top-right — leaving
   /// the bottom-right empty instead of stretching a small window to fill.
   private func place(_ window: AXUIElement, in slot: CGRect, usable: CGRect) {
-    let current = frame(of: window)?.size
+    let natural = naturalSize(of: window)
     let settable = isSizeSettable(window)
-    let small =
-      current.map { $0.width < usable.width * 0.5 && $0.height < usable.height * 0.5 } ?? false
+    let small = natural.width < usable.width * 0.5 && natural.height < usable.height * 0.5
 
-    if let size = current, !settable || small {
-      // Anchor to the slot's top-right (AX origin is top-left, so top == minY).
-      let x = max(slot.minX, slot.maxX - size.width)
-      setPosition(window, CGPoint(x: x, y: slot.minY))
-      Log.write("kept natural \(Int(size.width))×\(Int(size.height)) (small/fixed), top-right")
+    if (small || !settable), natural.width > 0, natural.height > 0 {
+      // Keep the natural size, anchored top-right of the slot (AX origin is
+      // top-left, so top == minY). Restore the size too, in case a prior layout
+      // had stretched this window to fill.
+      let origin = CGPoint(x: max(slot.minX, slot.maxX - natural.width), y: slot.minY)
+      setPosition(window, origin)
+      if settable { setSize(window, natural) }
+      setPosition(window, origin)
+      Log.write("kept natural \(Int(natural.width))×\(Int(natural.height)) (small/fixed), top-right")
       return
     }
     setPosition(window, slot.origin)
@@ -316,8 +368,17 @@ final class WindowManager {
     setPosition(window, slot.origin)  // re-anchor for apps that recenter on resize
   }
 
+  /// A window's size the first time we ever saw it — recorded once and never
+  /// overwritten, so it reflects the natural opening size, not a tiled size.
+  private func naturalSize(of window: AXUIElement) -> CGSize {
+    if let hit = naturalSizes.first(where: { CFEqual($0.window, window) }) { return hit.size }
+    let size = frame(of: window)?.size ?? .zero
+    naturalSizes.append((window, size))
+    return size
+  }
+
   private func isSmall(_ window: AXUIElement, _ usable: CGRect) -> Bool {
-    guard let size = frame(of: window)?.size else { return false }
+    let size = naturalSize(of: window)
     return size.width < usable.width * 0.5 && size.height < usable.height * 0.5
   }
 
@@ -381,11 +442,14 @@ final class WindowManager {
     let callback: AXObserverCallback = { _, element, notification, refcon in
       guard let refcon else { return }
       let manager = Unmanaged<WindowManager>.fromOpaque(refcon).takeUnretainedValue()
-      guard (notification as String) == (kAXWindowCreatedNotification as String) else { return }
-      Log.write("AXWindowCreated received")
-      let window = element
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-        manager.handleWindowCreated(window)
+      let note = notification as String
+      if note == (kAXWindowCreatedNotification as String) {
+        let window = element
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+          manager.handleWindowCreated(window)
+        }
+      } else if note == (kAXUIElementDestroyedNotification as String) {
+        DispatchQueue.main.async { manager.handleWindowClosed() }
       }
     }
     guard AXObserverCreate(pid, callback, &observer) == .success, let observer else { return }
@@ -393,6 +457,8 @@ final class WindowManager {
     let appElement = AXUIElementCreateApplication(pid)
     let refcon = Unmanaged.passUnretained(self).toOpaque()
     AXObserverAddNotification(observer, appElement, kAXWindowCreatedNotification as CFString, refcon)
+    AXObserverAddNotification(
+      observer, appElement, kAXUIElementDestroyedNotification as CFString, refcon)
     CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
     observers[pid] = observer
   }
