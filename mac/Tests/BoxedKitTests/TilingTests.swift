@@ -8,16 +8,21 @@ final class TilingTests: XCTestCase {
 
   // MARK: "compact" (don't-stretch) detection
 
-  func testCompactDetection() {
-    let screen = CGSize(width: 1710, height: 1069)
-    // Genuinely small windows (e.g. a small Preview) are compact…
-    XCTAssertTrue(Tiling.isCompact(CGSize(width: 708, height: 276), in: screen))
-    XCTAssertTrue(Tiling.isCompact(CGSize(width: 400, height: 300), in: screen))
-    // …but a near-half window is NOT — the stricter threshold excludes it.
-    XCTAssertFalse(Tiling.isCompact(CGSize(width: 847, height: 488), in: screen))
-    // Full-screen and full-width windows are never compact.
-    XCTAssertFalse(Tiling.isCompact(screen, in: screen))
-    XCTAssertFalse(Tiling.isCompact(CGSize(width: 1600, height: 200), in: screen))
+  func testPlacement() {
+    let slot = CGRect(x: 100, y: 50, width: 800, height: 600)
+    // The regression guard: a resizable window MUST fill its slot exactly.
+    XCTAssertEqual(
+      Tiling.placement(slot: slot, natural: CGSize(width: 300, height: 200), resizable: true), slot)
+    XCTAssertEqual(
+      Tiling.placement(slot: slot, natural: CGSize(width: 9999, height: 9999), resizable: true), slot)
+    // A non-resizable window keeps its size, anchored top-right of the slot.
+    XCTAssertEqual(
+      Tiling.placement(slot: slot, natural: CGSize(width: 300, height: 200), resizable: false),
+      CGRect(x: 600, y: 50, width: 300, height: 200))  // x = slot.maxX - 300
+    // …but never larger than the slot.
+    XCTAssertEqual(
+      Tiling.placement(slot: slot, natural: CGSize(width: 2000, height: 2000), resizable: false),
+      slot)
   }
 
   // MARK: adjustable primary split (draggable edge)

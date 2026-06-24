@@ -26,10 +26,6 @@ final class WindowManager {
 
   private var observers: [pid_t: AXObserver] = [:]
   private var reflowPending = false
-  /// Each window's size the first time we saw it — its "natural" size, before
-  /// boxed ever tiled it. Used to decide "small" so a window tiled into a small
-  /// slot isn't later mistaken for a naturally-small one.
-  private var naturalSizes: [(window: AXUIElement, size: CGSize)] = []
 
   private struct Session {
     var windows: [AXUIElement]
@@ -70,7 +66,6 @@ final class WindowManager {
   }
 
   func handleWindowCreated(_ window: AXUIElement) {
-    _ = naturalSize(of: window)  // record its opening size before anything tiles it
     // A newly-opened window should come to the front, never hide behind tiles.
     if isTileable(window) {
       AXUIElementPerformAction(window, kAXRaiseAction as CFString)
@@ -127,10 +122,9 @@ final class WindowManager {
       (frame(of: candidate).map { screenContains(screen, $0) } ?? false)
         && !alive.contains { CFEqual($0, candidate) }
     }
-    let combined = alive + newcomers
-    guard !combined.isEmpty else { return }
-    let usable = usableRect(on: screen)
-    let windows = combined.filter { !isSmall($0, usable) } + combined.filter { isSmall($0, usable) }
+    // Keep existing windows in their order; new ones go to the trailing slots.
+    let windows = alive + newcomers
+    guard !windows.isEmpty else { return }
     let keepLayout = windows.count == old.windows.count
     session = Session(
       windows: windows, screen: screen, layoutIndex: keepLayout ? old.layoutIndex : 0,
@@ -156,9 +150,8 @@ final class WindowManager {
       Log.write("organize: no windows to tile")
       return nil
     }
-    // Big windows take the primary slots; small windows fall into the stack.
-    let usable = usableRect(on: screen)
-    let windows = onScreen.filter { !isSmall($0, usable) } + onScreen.filter { isSmall($0, usable) }
+    // Biggest windows take the primary slots (main), smaller ones the stack.
+    let windows = onScreen.sorted { windowArea($0) > windowArea($1) }
     session = Session(
       windows: windows, screen: screen, layoutIndex: 0, order: Array(0..<windows.count))
     applySession()
@@ -518,7 +511,7 @@ final class WindowManager {
     let rects = Tiling.slots(
       kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio)
     for slot in 0..<min(count, rects.count) {
-      place(s.windows[s.order[slot]], in: rects[slot], usable: usable)
+      place(s.windows[s.order[slot]], in: rects[slot])
     }
     Log.write("applied \(Tiling.name(kind, count: count)) (count=\(count), order=\(s.order))")
   }
@@ -638,42 +631,21 @@ final class WindowManager {
     return CGRect(origin: point, size: size)
   }
 
-  /// Place a window in its slot. Big, resizable windows fill the slot. Windows that
-  /// are fixed-size, or "small" by default (under half the screen in BOTH width and
-  /// height), keep their natural size and tuck into the slot's top-right — leaving
-  /// the bottom-right empty instead of stretching a small window to fill.
-  private func place(_ window: AXUIElement, in slot: CGRect, usable: CGRect) {
-    let natural = naturalSize(of: window)
-    let settable = isSizeSettable(window)
-    let small = Tiling.isCompact(natural, in: usable.size)
-
-    if (small || !settable), natural.width > 0, natural.height > 0 {
-      // Keep the natural size, anchored top-right of the slot (AX origin is
-      // top-left, so top == minY). Restore the size too, in case a prior layout
-      // had stretched this window to fill.
-      let origin = CGPoint(x: max(slot.minX, slot.maxX - natural.width), y: slot.minY)
-      setPosition(window, origin)
-      if settable { setSize(window, natural) }
-      setPosition(window, origin)
-      Log.write("kept natural \(Int(natural.width))×\(Int(natural.height)) (small/fixed), top-right")
-      return
-    }
-    setPosition(window, slot.origin)
-    setSize(window, slot.size)
-    setPosition(window, slot.origin)  // re-anchor for apps that recenter on resize
+  /// Place a window in its slot. Resizable windows fill the slot; a non-resizable
+  /// window keeps its size, anchored top-right (it can't be stretched). The
+  /// fill/keep decision is the pure, tested `Tiling.placement`.
+  private func place(_ window: AXUIElement, in slot: CGRect) {
+    let resizable = isSizeSettable(window)
+    let natural = frame(of: window)?.size ?? slot.size
+    let target = Tiling.placement(slot: slot, natural: natural, resizable: resizable)
+    setPosition(window, target.origin)
+    if resizable { setSize(window, target.size) }
+    setPosition(window, target.origin)  // re-anchor for apps that recenter on resize
   }
 
-  /// A window's size the first time we ever saw it — recorded once and never
-  /// overwritten, so it reflects the natural opening size, not a tiled size.
-  private func naturalSize(of window: AXUIElement) -> CGSize {
-    if let hit = naturalSizes.first(where: { CFEqual($0.window, window) }) { return hit.size }
-    let size = frame(of: window)?.size ?? .zero
-    naturalSizes.append((window, size))
-    return size
-  }
-
-  private func isSmall(_ window: AXUIElement, _ usable: CGRect) -> Bool {
-    Tiling.isCompact(naturalSize(of: window), in: usable.size)
+  private func windowArea(_ window: AXUIElement) -> CGFloat {
+    guard let f = frame(of: window) else { return 0 }
+    return f.width * f.height
   }
 
   private func setPosition(_ window: AXUIElement, _ origin: CGPoint) {

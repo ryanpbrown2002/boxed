@@ -41,18 +41,15 @@ public enum Tiling {
     }
   }
 
-  /// The largest fraction of the display (in each dimension) a window can be and
-  /// still count as "compact" — i.e. small enough to keep its natural size and
-  /// tuck into a corner rather than be stretched to fill its slot.
-  public static let compactFraction: CGFloat = 0.45
-
-  /// Is `size` a "compact" window on a display of `screen` size? True only when it
-  /// is under `compactFraction` of the display in BOTH width and height, so a
-  /// near-half window (which should still fill) is not treated as compact.
-  public static func isCompact(_ size: CGSize, in screen: CGSize) -> Bool {
-    guard size.width > 0, size.height > 0, screen.width > 0, screen.height > 0 else { return false }
-    return size.width < screen.width * compactFraction
-      && size.height < screen.height * compactFraction
+  /// Where a window goes within its slot. A **resizable** window fills the slot
+  /// exactly (the core tiling behavior). A **non-resizable** window can't be
+  /// stretched, so it keeps its natural size, anchored to the slot's top-right
+  /// (top-left origin) and capped to the slot.
+  public static func placement(slot: CGRect, natural: CGSize, resizable: Bool) -> CGRect {
+    guard !resizable, natural.width > 0, natural.height > 0 else { return slot }
+    let w = min(natural.width, slot.width)
+    let h = min(natural.height, slot.height)
+    return CGRect(x: slot.maxX - w, y: slot.minY, width: w, height: h)
   }
 
   /// Smallest fraction either side of an adjustable split may shrink to.
