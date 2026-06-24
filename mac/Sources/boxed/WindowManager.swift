@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import BoxedKit
+import CoreGraphics
 
 /// Watches for newly-opened windows and, when one appears, asks the delegate to
 /// offer to organize. Organizing tiles every window on the active display; the
@@ -113,21 +114,63 @@ final class WindowManager {
   // MARK: - Window discovery
 
   private func tileableWindows() -> [AXUIElement] {
+    // The Accessibility window list includes windows that aren't actually visible
+    // (other Spaces, hidden helpers, zero-size ghosts) — counting those leaves a
+    // gap in the layout. Cross-check against what's genuinely on screen right now.
+    let visible = onScreenWindows()
     var result: [AXUIElement] = []
+    var rawCount = 0
+
     let apps = NSWorkspace.shared.runningApplications.filter {
       $0.activationPolicy == .regular && !$0.isHidden
     }
     for app in apps {
-      let appElement = AXUIElementCreateApplication(app.processIdentifier)
+      let pid = app.processIdentifier
+      let appElement = AXUIElementCreateApplication(pid)
       var value: CFTypeRef?
       guard
         AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &value)
           == .success,
         let windows = value as? [AXUIElement]
       else { continue }
-      result.append(contentsOf: windows.filter(isTileable))
+      for window in windows where isTileable(window) {
+        rawCount += 1
+        guard let f = frame(of: window), isVisible(f, pid: pid, in: visible) else { continue }
+        result.append(window)
+      }
     }
+    Log.write("tileable windows: \(result.count) visible (of \(rawCount) AX-standard)")
     return result
+  }
+
+  /// Windows actually rendered on the current Space, from the window server.
+  /// Returns (owning pid, frame in top-left coords) for normal app windows only.
+  private func onScreenWindows() -> [(pid: pid_t, frame: CGRect)] {
+    let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+    guard
+      let list = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]]
+    else { return [] }
+
+    var out: [(pid_t, CGRect)] = []
+    for info in list {
+      guard
+        let layer = info[kCGWindowLayer as String] as? Int, layer == 0,  // normal windows
+        let pidNumber = info[kCGWindowOwnerPID as String] as? NSNumber,
+        let boundsDict = info[kCGWindowBounds as String] as? NSDictionary,
+        let frame = CGRect(dictionaryRepresentation: boundsDict as CFDictionary)
+      else { continue }
+      if frame.width < 50 || frame.height < 50 { continue }  // skip ghosts/affordances
+      out.append((pidNumber.int32Value, frame))
+    }
+    return out
+  }
+
+  /// Is this AX window backed by a real on-screen window of the same app?
+  private func isVisible(_ axFrame: CGRect, pid: pid_t, in visible: [(pid: pid_t, frame: CGRect)])
+    -> Bool
+  {
+    let center = CGPoint(x: axFrame.midX, y: axFrame.midY)
+    return visible.contains { $0.pid == pid && $0.frame.insetBy(dx: -2, dy: -2).contains(center) }
   }
 
   private func isTileable(_ window: AXUIElement) -> Bool {
