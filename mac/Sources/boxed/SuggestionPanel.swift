@@ -14,11 +14,11 @@ final class SuggestionPanel: NSObject {
   private var dismissTimer: Timer?
   private var suggestions: [WindowSuggestion] = []
 
-  /// How long the prompt lingers before quietly disappearing.
-  var timeout: TimeInterval = 5
+  /// How long the prompt lingers before quietly fading away.
+  var timeout: TimeInterval = 9
 
   func present(_ suggestions: [WindowSuggestion], near anchor: CGRect) {
-    dismiss()
+    dismiss(animated: false)
     guard !suggestions.isEmpty else { return }
     self.suggestions = suggestions
 
@@ -40,9 +40,12 @@ final class SuggestionPanel: NSObject {
     panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
     panel.contentView = content
 
-    panel.setFrame(framePlacement(size: size, anchor: anchor), display: true)
+    panel.alphaValue = 1
+    let placed = framePlacement(size: size, anchor: anchor)
+    panel.setFrame(placed, display: true)
     panel.orderFrontRegardless()
     self.panel = panel
+    Log.write("panel ordered front at \(NSStringFromRect(placed))")
 
     dismissTimer?.invalidate()
     dismissTimer = Timer.scheduledTimer(withTimeInterval: timeout, repeats: false) {
@@ -51,11 +54,20 @@ final class SuggestionPanel: NSObject {
     }
   }
 
-  func dismiss() {
+  func dismiss(animated: Bool = true) {
     dismissTimer?.invalidate()
     dismissTimer = nil
-    panel?.orderOut(nil)
-    panel = nil
+    guard let panel else { return }
+    self.panel = nil
+    if animated {
+      NSAnimationContext.runAnimationGroup(
+        { context in
+          context.duration = 0.35
+          panel.animator().alphaValue = 0
+        }, completionHandler: { panel.orderOut(nil) })
+    } else {
+      panel.orderOut(nil)
+    }
   }
 
   // MARK: - Placement
@@ -64,11 +76,14 @@ final class SuggestionPanel: NSObject {
   /// clamp to the display so it never spills off-screen.
   private func framePlacement(size: NSSize, anchor: CGRect) -> CGRect {
     var x = anchor.midX - size.width / 2
-    var y = anchor.maxY - size.height - 14
+    // Prefer floating just *above* the window's top edge.
+    var y = anchor.maxY + 10
 
     let screen =
       NSScreen.screens.first(where: { $0.frame.intersects(anchor) }) ?? NSScreen.main
     if let vf = screen?.visibleFrame {
+      // No room above (near the top of the screen)? Tuck it just inside instead.
+      if y + size.height > vf.maxY - 6 { y = anchor.maxY - size.height - 14 }
       x = min(max(x, vf.minX + 8), vf.maxX - size.width - 8)
       y = min(max(y, vf.minY + 8), vf.maxY - size.height - 8)
     }
@@ -90,13 +105,8 @@ final class SuggestionPanel: NSObject {
     stack.orientation = .horizontal
     stack.spacing = 6
     stack.alignment = .centerY
-    stack.edgeInsets = NSEdgeInsets(top: 7, left: 12, bottom: 7, right: 8)
+    stack.edgeInsets = NSEdgeInsets(top: 7, left: 8, bottom: 7, right: 8)
     stack.translatesAutoresizingMaskIntoConstraints = false
-
-    let label = NSTextField(labelWithString: "Snap into layout?")
-    label.font = .systemFont(ofSize: 12, weight: .medium)
-    label.textColor = .secondaryLabelColor
-    stack.addArrangedSubview(label)
 
     for (index, suggestion) in suggestions.enumerated() {
       let button = NSButton(

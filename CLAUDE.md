@@ -72,14 +72,23 @@ ignores it, nothing moves. The only en-masse action is the explicit, user-invoke
 
 For the native app:
 
-- Pure geometry lives in `Suggester.swift` (which options to offer) and
-  `Layout.swift` (BSP math) — no window/AppKit APIs in there, so they stay
-  testable. Keep it that way. Verify with a standalone `swiftc` check.
+- The new-window pill offers a single **Organize** action that calls
+  `WindowManager.tidyAll()` (BSP-tile every window on the active display). The
+  layout is derived from window count, so "more windows = denser layout" falls out
+  for free. Don't auto-apply it — it fires only on the user's click/shortcut.
+- Pure BSP math lives in `Layout.swift` — no window/AppKit APIs in there, so it
+  stays testable. Keep it that way. Verify with a standalone `swiftc` check
+  (full Xcode isn't installed, so `swift test`/XCTest won't run here).
 - All window manipulation goes through the Accessibility API in `WindowManager`,
-  which acts only on a user's suggestion click or Tidy all — never on its own.
-- The prompt (`SuggestionPanel`) is a non-activating `NSPanel` that auto-dismisses.
-  Keep it unobtrusive; it doubles as boxed's only "presence" (no separate
-  on-indicator by design).
+  which acts only on a user's click or shortcut — never on its own.
+- The pill (`SuggestionPanel`) is a non-activating `NSPanel` that lingers then
+  fades. Keep it unobtrusive; it doubles as boxed's only "presence."
+- Summon paths: ⌥ right-click anywhere, ⌥⌘T (immediate), menubar. Keep ⌥ gating
+  on the right-click so normal context menus are never hijacked.
+- **Signing:** `scripts/setup-signing.sh` creates a stable self-signed identity so
+  the Accessibility grant persists across rebuilds. `make-app.sh` uses it if
+  present. Don't go back to ad-hoc-only — it forces a re-grant every build.
+- `Log.swift` writes to `/tmp/boxed.log`; use it to debug `open`-launched builds.
 - It's a menubar agent (`LSUIElement`, `.accessory` activation) — no dock icon,
   no main window. Keep it that way; "gets out of the way" still rules.
 - Build with `cd mac && ./scripts/make-app.sh`. Verify `swift build` compiles

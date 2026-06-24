@@ -31,8 +31,18 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-# Ad-hoc sign so the bundle has a stable identity for the Accessibility grant.
-codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
+# Prefer the stable self-signed identity (so the Accessibility grant persists
+# across rebuilds). Fall back to ad-hoc if setup-signing.sh hasn't been run.
+IDENTITY="boxed-dev"
+KEYCHAIN="$HOME/Library/Keychains/boxed-dev.keychain-db"
+if security find-identity -p codesigning "$KEYCHAIN" 2>/dev/null | grep -q "$IDENTITY"; then
+  security unlock-keychain -p boxed "$KEYCHAIN" 2>/dev/null || true
+  codesign --force --deep --sign "$IDENTITY" --keychain "$KEYCHAIN" "$APP" >/dev/null 2>&1
+  echo "  signed with stable identity '$IDENTITY' (grant persists across rebuilds)"
+else
+  codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
+  echo "  ad-hoc signed — run scripts/setup-signing.sh once so the grant persists"
+fi
 
 echo "✓ built $(pwd)/$APP"
 echo "  Run it:   open $APP"

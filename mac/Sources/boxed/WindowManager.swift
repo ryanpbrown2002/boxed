@@ -11,9 +11,9 @@ final class WindowManager {
   var suggestNewWindows = true
   var gap: CGFloat = 8
 
-  /// Called on the main thread when a new window should offer suggestions.
-  /// `anchor` is the new window's frame in Cocoa (bottom-left) coordinates.
-  var onSuggest: ((_ suggestions: [WindowSuggestion], _ anchor: CGRect) -> Void)?
+  /// Called on the main thread when a new window appears and we should offer to
+  /// organize. `anchor` is the new window's frame in Cocoa (bottom-left) coords.
+  var onNewWindow: ((_ anchor: CGRect) -> Void)?
 
   private var observers: [pid_t: AXObserver] = [:]
 
@@ -26,6 +26,7 @@ final class WindowManager {
       nc.addObserver(self, selector: #selector(appsChanged), name: name, object: nil)
     }
     observeRunningApps()
+    Log.write("started, observing \(observers.count) apps for new windows")
   }
 
   @objc private func appsChanged(_ note: Notification) {
@@ -38,25 +39,8 @@ final class WindowManager {
   /// had a moment to settle into its initial size.
   func handleWindowCreated(_ window: AXUIElement) {
     guard suggestNewWindows, isTileable(window), let newFrame = frame(of: window) else { return }
-
-    let screen = screen(forAX: newFrame)
-    let usable = usableRect(on: screen)
-    let incumbent = largestOtherWindow(excluding: window, on: screen)
-    let incumbentFrame = incumbent.flatMap { frame(of: $0) }
-
-    let placements = Suggester.placements(usable: usable, incumbent: incumbentFrame, gap: gap)
-    guard !placements.isEmpty else { return }
-
-    let suggestions = placements.map { placement in
-      WindowSuggestion(label: placement.label) { [weak self] in
-        guard let self else { return }
-        self.setFrame(window, placement.newFrame)
-        if let incumbent, let incumbentFrame = placement.incumbentFrame {
-          self.setFrame(incumbent, incumbentFrame)
-        }
-      }
-    }
-    onSuggest?(suggestions, axToCocoa(newFrame))
+    Log.write("new window -> offering organize")
+    onNewWindow?(axToCocoa(newFrame))
   }
 
   // MARK: - Manual tidy (user-initiated only)
@@ -104,18 +88,6 @@ final class WindowManager {
     if let m = minimized as? Bool, m { return false }
 
     return true
-  }
-
-  private func largestOtherWindow(excluding target: AXUIElement, on screen: NSScreen)
-    -> AXUIElement?
-  {
-    tileableWindows()
-      .filter { !CFEqual($0, target) }
-      .compactMap { window -> (AXUIElement, CGFloat)? in
-        guard let f = frame(of: window), screenContains(screen, f) else { return nil }
-        return (window, f.width * f.height)
-      }
-      .max(by: { $0.1 < $1.1 })?.0
   }
 
   // MARK: - Geometry
@@ -167,13 +139,6 @@ final class WindowManager {
       height: rect.height)
   }
 
-  private func screen(forAX rect: CGRect) -> NSScreen {
-    let cocoa = axToCocoa(rect)
-    let center = CGPoint(x: cocoa.midX, y: cocoa.midY)
-    return NSScreen.screens.first(where: { $0.frame.contains(center) }) ?? NSScreen.main
-      ?? NSScreen.screens[0]
-  }
-
   private func screenContains(_ screen: NSScreen, _ axRect: CGRect) -> Bool {
     let cocoa = axToCocoa(axRect)
     return screen.frame.contains(CGPoint(x: cocoa.midX, y: cocoa.midY))
@@ -196,6 +161,7 @@ final class WindowManager {
       guard let refcon else { return }
       let manager = Unmanaged<WindowManager>.fromOpaque(refcon).takeUnretainedValue()
       guard (notification as String) == (kAXWindowCreatedNotification as String) else { return }
+      Log.write("AXWindowCreated received")
       let window = element
       // Let the app finish sizing the window before we read its frame.
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {

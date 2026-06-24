@@ -1,73 +1,76 @@
 # boxed (native macOS)
 
 A menubar helper that stays out of your way. It does **not** auto-arrange your
-windows. Instead, when you open a new window, a small tooltip-style prompt appears
-near it — *"Snap into layout?"* — with a couple of context-aware options. Click one
-to place the window; ignore it and it disappears on its own, leaving the window
-exactly where macOS put it. Tier 1: needs only Accessibility permission, no SIP.
+windows. When you open a new window, a small tooltip-style pill appears near it
+with a single **⧉ Organize tabs** button. Click it to tile all your windows into a
+layout that adapts to how many are open (1 → full, 2 → split, 3 → thirds, 4 →
+quad…). Ignore it and it fades away, leaving everything where macOS put it.
+Tier 1: needs only Accessibility permission, no SIP.
 
-## Build & run
+## One-time setup
 
 ```bash
 cd mac
-./scripts/make-app.sh        # builds boxed.app (a menubar agent, no dock icon)
+./scripts/setup-signing.sh   # create a stable local signing identity (run once)
+./scripts/make-app.sh        # build boxed.app (menubar agent, no dock icon)
 open boxed.app
 ```
 
-On first launch macOS prompts for **Accessibility** permission (or grant it in
-**System Settings → Privacy & Security → Accessibility**, toggle `boxed` on).
-Window control is impossible without it. After granting, relaunch:
+Grant **Accessibility** when prompted (or System Settings → Privacy & Security →
+Accessibility → toggle `boxed` on), then relaunch:
 
 ```bash
 killall boxed 2>/dev/null; open boxed.app
 ```
 
-Then open a new window somewhere and the prompt should appear next to it.
+`setup-signing.sh` matters: it signs boxed with a stable self-signed identity so
+the Accessibility grant **survives every rebuild**. Without it the app is ad-hoc
+signed and macOS forgets the grant each time you rebuild. (Undo any time with
+`security delete-keychain ~/Library/Keychains/boxed-dev.keychain-db`.)
 
 ## What it does
 
-- **Suggests, never forces.** A transient, non-activating prompt near each newly
-  opened window. It steals no focus and auto-dismisses after a few seconds.
-- **Context-aware options.** If one window already fills the screen, you get
-  *Split* choices (placing the newcomer beside it and nudging the incumbent to the
-  other half). Otherwise you get quick spots (*Left / Right / Fill*).
-- **Menubar `▣`:**
-  - **Suggest layouts for new windows** — toggle the prompt on/off.
-  - **Tidy all windows (⌥⌘T)** — the one *active* command: BSP-tile everything on
-    the current display. User-initiated only; also bound to the global hotkey.
-  - **Quit boxed**.
+- **Suggests, never forces.** A transient, non-activating pill near each newly
+  opened window. It steals no focus and fades out after ~9s.
+- **One action: Organize.** Clicking **⧉ Organize tabs** BSP-tiles every window on
+  the active display. The layout is derived from the window count, so opening more
+  windows and re-organizing gives you a denser layout automatically.
+- **Summon on demand:**
+  - **⌥ (Option) + right-click anywhere** → pop the Organize pill at your cursor.
+    (Gated on Option so normal right-clicks / context menus are untouched.)
+  - **⌥⌘T** → organize immediately, no pill.
+  - Menubar **`▣` → Organize tabs now**.
+- **Menubar toggle:** *Offer to organize on new windows* (turn the pill on/off).
 
-> Normal macOS workflow is untouched: opening apps behaves exactly as before
-> unless you click a suggestion. Only **Tidy all** moves windows en masse.
+> Normal macOS workflow is untouched — opening apps behaves exactly as before
+> unless you click Organize (or use a shortcut).
 
 ## Code map
 
-- [`Suggester.swift`](Sources/boxed/Suggester.swift) — pure geometry that decides
-  which placement options to offer (verified with a standalone `swiftc` check).
+- [`WindowManager.swift`](Sources/boxed/WindowManager.swift) — discovers windows
+  (Accessibility API), watches for new ones (`AXObserver`), applies frames. Acts
+  only on your click; `tidyAll()` is the organize-everything pass.
+- [`Layout.swift`](Sources/boxed/Layout.swift) — pure BSP tiling math (verified
+  with a standalone `swiftc` check).
 - [`SuggestionPanel.swift`](Sources/boxed/SuggestionPanel.swift) — the transient
-  prompt (non-activating `NSPanel`, auto-dismiss, screen-clamped positioning).
-- [`WindowManager.swift`](Sources/boxed/WindowManager.swift) — discovers windows,
-  watches for new ones (`AXObserver`), applies frames. Holds no opinions of its
-  own; only acts on your clicks (or Tidy all).
-- [`Layout.swift`](Sources/boxed/Layout.swift) — pure BSP math used by Tidy all.
+  pill (non-activating `NSPanel`, lingers then fades, screen-clamped).
 - [`AppDelegate.swift`](Sources/boxed/AppDelegate.swift) — menubar, permission
-  prompt, hotkey.
+  prompt, shortcuts, ⌥ right-click summon.
+- [`Log.swift`](Sources/boxed/Log.swift) — file logger at `/tmp/boxed.log` (handy
+  for debugging an `open`-launched build whose stderr goes nowhere).
 
 ## Dev
 
 ```bash
-swift build                  # debug build
+swift build        # debug build (no signing/bundle)
+tail -f /tmp/boxed.log   # watch what the running app is doing
 ```
 
 ## Known limitations / things to play with
 
-- Suggestions consider the single largest existing window; richer "fit into the
-  free space" logic is the obvious next experiment.
-- A new window opened by an app that *just* launched can be missed (we attach the
-  observer a beat after launch).
-- No persisted layouts, manual reorder, or "managed set reflows when a window
-  closes" yet — that auto-reflow-on-close idea is a natural follow-up for windows
-  you explicitly snapped.
 - Active display only; cross-Space moves are Phase 2 (SIP).
+- BSP order follows window-enumeration order; no manual reorder/swap yet.
+- No persisted layouts, no per-app float rules, no "managed set reflows when a
+  window closes" yet — natural follow-ups.
 - `swift test`/XCTest needs full Xcode (CLT only here); pure logic is verified via
   standalone `swiftc` checks.
