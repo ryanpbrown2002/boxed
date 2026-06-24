@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var suggestItem: NSMenuItem!
   private var hotKeyMonitor: Any?
   private var rightClickMonitor: Any?
+  private var dragSwapMonitor: Any?
   private let manager = WindowManager()
   private let suggestionPanel = SuggestionPanel()
 
@@ -17,6 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     manager.onNewWindow = { [weak self] anchor in
       self?.showOrganizePill(near: anchor)
     }
+    // Drag-to-swap is only live while the adjust pill is on screen.
+    suggestionPanel.onDismiss = { [weak self] in self?.endDragSwap() }
     manager.start()
     installShortcuts()
   }
@@ -43,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   /// Swap rotates which window sits where; Rebox cycles to the next layout. Each
   /// press re-tiles and refreshes the pill (resetting its fade timer).
   private func showAdjustPill(layoutName: String) {
+    beginDragSwap()
     let swap = WindowSuggestion(label: "⇄ Swap", keepsPanelOpen: true) { [weak self] in
       guard let self else { return }
       self.showAdjustPill(layoutName: self.manager.swap() ?? layoutName)
@@ -60,6 +64,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private func topCenterAnchor() -> CGRect {
     let vf = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? .zero
     return CGRect(x: vf.midX, y: vf.maxY, width: 0, height: 0)
+  }
+
+  // MARK: - Drag-to-swap (only while the adjust pill is up)
+
+  /// While the adjust pill is showing, releasing a window dropped onto another
+  /// swaps the two. Idempotent — safe to call on every adjust-pill present.
+  private func beginDragSwap() {
+    guard dragSwapMonitor == nil else { return }
+    Log.write("drag-swap enabled")
+    dragSwapMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseUp) { [weak self] _ in
+      // Let the dragged window settle into its final position first.
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        guard let self else { return }
+        if let name = self.manager.handleWindowDropped() {
+          self.showAdjustPill(layoutName: name)  // re-snap + keep the pill alive
+        }
+      }
+    }
+  }
+
+  private func endDragSwap() {
+    guard let monitor = dragSwapMonitor else { return }
+    NSEvent.removeMonitor(monitor)
+    dragSwapMonitor = nil
+    Log.write("drag-swap disabled")
   }
 
   // MARK: - Menubar

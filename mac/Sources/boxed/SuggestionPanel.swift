@@ -26,11 +26,15 @@ final class SuggestionPanel: NSObject {
   /// How long the prompt lingers before quietly fading away.
   var timeout: TimeInterval = 9
 
+  /// Called when the pill genuinely goes away (timeout or close) — not when it's
+  /// merely being replaced by a fresh present().
+  var onDismiss: (() -> Void)?
+
   func present(
     title: String? = nil, _ suggestions: [WindowSuggestion], near anchor: CGRect,
     prominent: Bool = false
   ) {
-    dismiss(animated: false)
+    dismiss(animated: false, notify: false)
     guard !suggestions.isEmpty else { return }
     self.suggestions = suggestions
 
@@ -66,7 +70,7 @@ final class SuggestionPanel: NSObject {
     }
   }
 
-  func dismiss(animated: Bool = true) {
+  func dismiss(animated: Bool = true, notify: Bool = true) {
     dismissTimer?.invalidate()
     dismissTimer = nil
     guard let panel else { return }
@@ -80,6 +84,7 @@ final class SuggestionPanel: NSObject {
     } else {
       panel.orderOut(nil)
     }
+    if notify { onDismiss?() }
   }
 
   // MARK: - Placement

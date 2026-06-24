@@ -91,6 +91,64 @@ final class WindowManager {
     return currentLayoutName()
   }
 
+  /// Called on mouse-up while the adjust pill is showing. If a window was dragged
+  /// off its slot and onto another's, swap the two and re-snap. Returns the layout
+  /// name if anything changed (so the caller can keep the pill alive), else nil.
+  @discardableResult
+  func handleWindowDropped() -> String? {
+    guard let s = session, s.windows.count > 1 else { return nil }
+    let count = s.windows.count
+    let kinds = Tiling.layouts(for: count)
+    guard !kinds.isEmpty else { return nil }
+    let kind = kinds[s.layoutIndex % kinds.count]
+    let rects = Tiling.slots(kind, count: count, in: usableRect(on: s.screen), gap: gap)
+    guard rects.count == count else { return nil }
+
+    let centers = (0..<count).map { slot in
+      frame(of: s.windows[s.order[slot]]).map { CGPoint(x: $0.midX, y: $0.midY) }
+    }
+
+    // Which slot's window moved farthest from where it belongs (the dragged one)?
+    let threshold: CGFloat = 40
+    var from: Int?
+    var maxDist: CGFloat = threshold
+    for slot in 0..<count {
+      guard let c = centers[slot] else { continue }
+      let home = CGPoint(x: rects[slot].midX, y: rects[slot].midY)
+      let d = hypot(c.x - home.x, c.y - home.y)
+      if d > maxDist {
+        maxDist = d
+        from = slot
+      }
+    }
+    guard let from, let dropped = centers[from] else { return nil }
+
+    // Nearest other slot to where it was dropped.
+    var to: Int?
+    var best = CGFloat.greatestFiniteMagnitude
+    for slot in 0..<count where slot != from {
+      let sc = CGPoint(x: rects[slot].midX, y: rects[slot].midY)
+      let d = hypot(dropped.x - sc.x, dropped.y - sc.y)
+      if d < best {
+        best = d
+        to = slot
+      }
+    }
+    let homeDist = hypot(
+      dropped.x - rects[from].midX, dropped.y - rects[from].midY)
+
+    var next = s
+    if let to, best < homeDist {
+      next.order.swapAt(from, to)
+      Log.write("drag-swap slots \(from) <-> \(to)")
+    } else {
+      Log.write("drag re-snap slot \(from)")
+    }
+    session = next
+    applySession()
+    return currentLayoutName()
+  }
+
   func currentLayoutName() -> String? {
     guard let s = session else { return nil }
     let kinds = Tiling.layouts(for: s.windows.count)
