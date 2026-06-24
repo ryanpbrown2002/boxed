@@ -26,12 +26,15 @@ final class SuggestionPanel: NSObject {
   /// How long the prompt lingers before quietly fading away.
   var timeout: TimeInterval = 9
 
-  func present(title: String? = nil, _ suggestions: [WindowSuggestion], near anchor: CGRect) {
+  func present(
+    title: String? = nil, _ suggestions: [WindowSuggestion], near anchor: CGRect,
+    prominent: Bool = false
+  ) {
     dismiss(animated: false)
     guard !suggestions.isEmpty else { return }
     self.suggestions = suggestions
 
-    let content = buildContent(title: title, suggestions)
+    let content = buildContent(title: title, suggestions, prominent: prominent)
     content.layoutSubtreeIfNeeded()
     let size = content.fittingSize
 
@@ -101,26 +104,35 @@ final class SuggestionPanel: NSObject {
 
   // MARK: - View
 
-  private func buildContent(title: String?, _ suggestions: [WindowSuggestion]) -> NSView {
+  private func buildContent(title: String?, _ suggestions: [WindowSuggestion], prominent: Bool)
+    -> NSView
+  {
+    let titleSize: CGFloat = prominent ? 16 : 12
+    let buttonSize: CGFloat = prominent ? 14 : 11
+    let controlSize: NSControl.ControlSize = prominent ? .large : .small
+    let padV: CGFloat = prominent ? 11 : 7
+    let padH: CGFloat = prominent ? 16 : 8
+
     let blur = NSVisualEffectView()
     blur.material = .hudWindow
     blur.state = .active
     blur.blendingMode = .behindWindow
     blur.wantsLayer = true
-    blur.layer?.cornerRadius = 11
+    blur.layer?.cornerRadius = prominent ? 15 : 11
     blur.layer?.masksToBounds = true
 
     let stack = NSStackView()
     stack.orientation = .horizontal
-    stack.spacing = 6
+    stack.spacing = prominent ? 10 : 6
     stack.alignment = .centerY
-    stack.edgeInsets = NSEdgeInsets(top: 7, left: title == nil ? 8 : 12, bottom: 7, right: 8)
+    stack.edgeInsets = NSEdgeInsets(
+      top: padV, left: title == nil ? padH - 4 : padH, bottom: padV, right: padH - 4)
     stack.translatesAutoresizingMaskIntoConstraints = false
 
     if let title {
       let label = NSTextField(labelWithString: title)
-      label.font = .systemFont(ofSize: 12, weight: .semibold)
-      label.textColor = .secondaryLabelColor
+      label.font = .systemFont(ofSize: titleSize, weight: .semibold)
+      label.textColor = .labelColor
       stack.addArrangedSubview(label)
     }
 
@@ -129,14 +141,15 @@ final class SuggestionPanel: NSObject {
         title: suggestion.label, target: self, action: #selector(suggestionClicked(_:)))
       button.tag = index
       button.bezelStyle = .rounded
-      button.controlSize = .small
-      button.font = .systemFont(ofSize: 11, weight: .semibold)
+      button.controlSize = controlSize
+      button.font = .systemFont(ofSize: buttonSize, weight: .semibold)
       stack.addArrangedSubview(button)
     }
 
     let close = NSButton(title: "✕", target: self, action: #selector(closeClicked))
     close.bezelStyle = .rounded
-    close.controlSize = .small
+    close.controlSize = controlSize
+    close.font = .systemFont(ofSize: buttonSize, weight: .semibold)
     stack.addArrangedSubview(close)
 
     blur.addSubview(stack)

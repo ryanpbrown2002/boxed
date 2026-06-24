@@ -51,12 +51,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       guard let self else { return }
       self.showAdjustPill(layoutName: self.manager.rebox() ?? layoutName)
     }
-    suggestionPanel.present(title: layoutName, [swap, rebox], near: bottomCenterAnchor())
+    suggestionPanel.present(
+      title: layoutName, [swap, rebox], near: topCenterAnchor(), prominent: true)
   }
 
-  private func bottomCenterAnchor() -> CGRect {
+  /// A point at the top-center of the active display. The panel clamps just below
+  /// the menu bar from here.
+  private func topCenterAnchor() -> CGRect {
     let vf = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? .zero
-    return CGRect(x: vf.midX, y: vf.minY + 56, width: 0, height: 0)
+    return CGRect(x: vf.midX, y: vf.maxY, width: 0, height: 0)
   }
 
   // MARK: - Menubar
