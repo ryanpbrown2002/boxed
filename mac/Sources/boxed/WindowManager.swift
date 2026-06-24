@@ -147,6 +147,31 @@ final class WindowManager {
     return currentLayoutName()
   }
 
+  /// The "Organize tabs" action. If the same windows are already in a session,
+  /// just re-align them to the current layout (preserving the layout choice and
+  /// any dragged ratios) instead of remixing from scratch. Only a changed set of
+  /// windows triggers a fresh organize.
+  @discardableResult
+  func organizeOrEdit() -> String? {
+    guard let screen = NSScreen.main ?? NSScreen.screens.first else { return nil }
+    let onScreen = tileableWindows().filter {
+      frame(of: $0).map { screenContains(screen, $0) } ?? false
+    }
+    guard !onScreen.isEmpty else { return nil }
+
+    if let s = session, sameWindowSet(s.windows, onScreen) {
+      Log.write("re-align (already organized) — keeping \(currentLayoutName() ?? "layout")")
+      applySession()  // tidy back into the current layout; don't remix
+      return currentLayoutName()
+    }
+    return organize()
+  }
+
+  private func sameWindowSet(_ a: [AXUIElement], _ b: [AXUIElement]) -> Bool {
+    guard a.count == b.count else { return false }
+    return b.allSatisfy { w in a.contains { CFEqual($0, w) } }
+  }
+
   /// Cycle to the next layout for the current window count and re-apply.
   @discardableResult
   func rebox() -> String? {

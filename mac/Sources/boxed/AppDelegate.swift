@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private lazy var splitters: [Splitter] = (0..<2).map { tag in
     let splitter = Splitter(tag: tag)
     splitter.onDragTo = { [weak self] tag, point in
+      self?.suggestionPanel.holdOpen()  // don't let edit mode fade mid-drag
       self?.manager.splitterDragBegan()
       self?.manager.setRatio(forDividerAt: tag, fromScreenPoint: point)
       self?.positionSplitters()  // handles follow the cursor live
@@ -21,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     splitter.onEnd = { [weak self] _ in
       self?.manager.splitterDragEnded()
       self?.positionSplitters()
+      self?.suggestionPanel.restartTimer()  // restart the fade once the drag ends
     }
     return splitter
   }
@@ -60,7 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   /// Tile the windows, then (if any moved) show the adjust pill out of the way.
   private func organizeAndAdjust() {
-    guard let name = manager.organize() else { return }
+    guard let name = manager.organizeOrEdit() else { return }
     showAdjustPill(layoutName: name)
   }
 
@@ -109,12 +111,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private func beginDragSwap() {
     guard dragSwapMonitor == nil else { return }
     Log.write("drag-swap enabled")
-    dragSwapMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseUp) { [weak self] _ in
+    dragSwapMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) {
+      [weak self] event in
+      guard let self else { return }
+      if event.type == .leftMouseDown {
+        self.suggestionPanel.holdOpen()  // pause the fade while a drag is in progress
+        return
+      }
       // Let the dragged window settle into its final position first.
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-        guard let self else { return }
         if let name = self.manager.handleWindowDropped() {
-          self.showAdjustPill(layoutName: name)  // re-snap + keep the pill alive
+          self.showAdjustPill(layoutName: name)  // re-snap + reset the fade
+        } else {
+          self.suggestionPanel.restartTimer()  // nothing moved — just restart the fade
         }
       }
     }

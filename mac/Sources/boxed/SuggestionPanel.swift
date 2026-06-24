@@ -63,6 +63,19 @@ final class SuggestionPanel: NSObject {
     self.panel = panel
     Log.write("panel ordered front at \(NSStringFromRect(placed))")
 
+    restartTimer()
+  }
+
+  /// Pause the fade — used while the user is mid-drag so edit mode doesn't expire.
+  func holdOpen() {
+    dismissTimer?.invalidate()
+    dismissTimer = nil
+  }
+
+  /// (Re)start the full fade countdown — called when a drag ends so the user gets
+  /// the whole window again.
+  func restartTimer() {
+    guard panel != nil else { return }
     dismissTimer?.invalidate()
     dismissTimer = Timer.scheduledTimer(withTimeInterval: timeout, repeats: false) {
       [weak self] _ in
