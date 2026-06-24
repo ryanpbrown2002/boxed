@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private var hotKeyMonitor: Any?
   private var rightClickMonitor: Any?
   private var dragSwapMonitor: Any?
+  private var reconcileMonitor: Any?
   private let manager = WindowManager()
   private let suggestionPanel = SuggestionPanel()
 
@@ -46,7 +47,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     manager.onReorganized = { [weak self] name in self?.showAdjustPill(layoutName: name) }
     manager.start()
     installShortcuts()
+    installDisplayReconcile()
     startCommandHook()
+  }
+
+  /// Always-on: after any mouse-up, move windows that crossed between boxed
+  /// displays into the destination's layout (cross-display auto-format).
+  private func installDisplayReconcile() {
+    reconcileMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseUp) { [weak self] _ in
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+        guard let self else { return }
+        self.manager.reconcileDisplays()
+        if self.manager.editMode { self.positionSplitters() }
+      }
+    }
   }
 
   // MARK: - The organize flow
@@ -162,6 +176,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       case "rebox": if let name = self.manager.rebox() { self.showAdjustPill(layoutName: name) }
       case "swap": if let name = self.manager.swap() { self.showAdjustPill(layoutName: name) }
       case "drop": if let name = self.manager.handleWindowDropped() { self.showAdjustPill(layoutName: name) }
+      case "reconcile": self.manager.reconcileDisplays()
       case "dismiss": self.suggestionPanel.dismiss()
       default:
         if cmd.hasPrefix("ratio "), let v = Double(cmd.dropFirst(6)) {

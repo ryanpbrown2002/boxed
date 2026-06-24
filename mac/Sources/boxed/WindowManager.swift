@@ -48,7 +48,20 @@ final class WindowManager {
     var insetLeft: CGFloat = 0
     var insetRight: CGFloat = 0
   }
-  private var session: Session?
+  /// One layout per display ("boxed" displays). Keyed by display ID.
+  private var sessions: [CGDirectDisplayID: Session] = [:]
+  /// The display currently being organized/edited — what `session` reads & writes.
+  private var activeDisplay: CGDirectDisplayID?
+
+  /// The active display's session. Most logic operates on this; per-display
+  /// reconciliation iterates `sessions` directly.
+  private var session: Session? {
+    get { activeDisplay.flatMap { sessions[$0] } }
+    set {
+      guard let id = activeDisplay else { return }
+      sessions[id] = newValue
+    }
+  }
 
   /// A divider was dragged this session, so the next mouse-up should snap clean.
   private var ratioDirty = false
@@ -99,11 +112,20 @@ final class WindowManager {
     onNewWindow?(axToCocoa(newFrame))
   }
 
-  /// A window (or other UI element) was destroyed. Only relevant in edit mode,
-  /// where a closed window should make the rest re-tile to fill the gap.
+  /// A window (or other UI element) was destroyed. Drop any closed window from its
+  /// display's session, but do NOT reflow — the survivors keep their sizes rather
+  /// than one growing to fill the gap.
   func handleWindowClosed() {
-    guard editMode, session != nil, !draggingSplitter else { return }
-    scheduleReflow()
+    var changed = false
+    for (id, var s) in sessions {
+      let before = s.windows.count
+      s.windows.removeAll { frame(of: $0) == nil }  // closed → AX frame unreadable
+      if s.windows.count != before {
+        sessions[id] = s.windows.isEmpty ? nil : normalized(s)
+        changed = true
+      }
+    }
+    if changed { Log.write("pruned closed window(s); not reflowing (no fullscreen)") }
   }
 
   /// Re-capture the windows on the active display and re-apply, coalescing bursts
@@ -150,7 +172,8 @@ final class WindowManager {
   /// layout for that count. Returns the layout's name (nil if nothing to tile).
   @discardableResult
   func organize() -> String? {
-    guard let screen = NSScreen.main ?? NSScreen.screens.first else { return nil }
+    guard let screen = screenUnderCursor() else { return nil }
+    activeDisplay = displayID(screen)
     let onScreen = tileableWindows().filter {
       frame(of: $0).map { screenContains(screen, $0) } ?? false
     }
@@ -172,7 +195,8 @@ final class WindowManager {
   /// windows triggers a fresh organize.
   @discardableResult
   func organizeOrEdit() -> String? {
-    guard let screen = NSScreen.main ?? NSScreen.screens.first else { return nil }
+    guard let screen = screenUnderCursor() else { return nil }
+    activeDisplay = displayID(screen)
     let onScreen = tileableWindows().filter {
       frame(of: $0).map { screenContains(screen, $0) } ?? false
     }
@@ -191,17 +215,17 @@ final class WindowManager {
     return b.allSatisfy { w in a.contains { CFEqual($0, w) } }
   }
 
-  /// How many tileable windows are on the active display right now.
+  /// How many tileable windows are on the display under the cursor right now.
   func tileableCount() -> Int {
-    guard let screen = NSScreen.main ?? NSScreen.screens.first else { return 0 }
+    guard let screen = screenUnderCursor() else { return 0 }
     return tileableWindows().filter { frame(of: $0).map { screenContains(screen, $0) } ?? false }
       .count
   }
 
-  /// Are the on-screen windows already the ones in the current session (so the
-  /// action would just re-align/edit rather than organize fresh)?
+  /// Is the display under the cursor already boxed with exactly its current
+  /// windows (so the action would re-align/edit rather than organize fresh)?
   func isAlreadyOrganized() -> Bool {
-    guard let s = session, let screen = NSScreen.main ?? NSScreen.screens.first else { return false }
+    guard let screen = screenUnderCursor(), let s = sessions[displayID(screen)] else { return false }
     let onScreen = tileableWindows().filter {
       frame(of: $0).map { screenContains(screen, $0) } ?? false
     }
@@ -304,25 +328,11 @@ final class WindowManager {
   func handleWindowDropped() -> String? {
     guard let s = session else { return nil }
 
-    // Released to another display? Any session window now on a different screen is
-    // let go — it stays where you dropped it; the rest reflow to fill the layout.
-    let remaining = s.windows.filter { frame(of: $0).map { screenContains(s.screen, $0) } ?? false }
-    if remaining.count != s.windows.count {
-      Log.write("released \(s.windows.count - remaining.count) window(s) to another display")
+    // If any window left this display, let reconcileDisplays handle it (move to
+    // another boxed display or release) — don't swap-snap it back here.
+    if s.windows.contains(where: { !(frame(of: $0).map { screenContains(s.screen, $0) } ?? false) }) {
       ratioDirty = false
-      guard !remaining.isEmpty else {
-        session = nil
-        return nil
-      }
-      let kinds = Tiling.layouts(for: remaining.count)
-      session = Session(
-        windows: remaining, screen: s.screen,
-        layoutIndex: min(s.layoutIndex, max(0, kinds.count - 1)),
-        order: Array(0..<remaining.count), ratio: s.ratio, stackRatio: s.stackRatio,
-        insetTop: s.insetTop, insetBottom: s.insetBottom, insetLeft: s.insetLeft,
-        insetRight: s.insetRight)
-      applySession()
-      return currentLayoutName()
+      return nil
     }
 
     guard s.windows.count > 1 else {
@@ -539,19 +549,69 @@ final class WindowManager {
   }
 
   private func applySession() {
-    guard let s = session else { return }
+    if let s = session { applyLayout(s) }
+  }
+
+  /// Tile one display's session (works for any display, not just the active one).
+  private func applyLayout(_ s: Session) {
     let count = s.windows.count
     let kinds = Tiling.layouts(for: count)
     guard !kinds.isEmpty else { return }
     let kind = kinds[s.layoutIndex % kinds.count]
-    let usable = usableRect(on: s.screen)
-    let eff = effectiveRect(usable, s)
+    let eff = effectiveRect(usableRect(on: s.screen), s)
     let rects = Tiling.slots(
       kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio)
     for slot in 0..<min(count, rects.count) {
       place(s.windows[s.order[slot]], in: rects[slot])
     }
-    Log.write("applied \(Tiling.name(kind, count: count)) (count=\(count), order=\(s.order))")
+    Log.write("applied \(Tiling.name(kind, count: count)) (count=\(count)) on display \(displayID(s.screen))")
+  }
+
+  /// A window count → a valid layout index that fits.
+  private func normalized(_ s: Session) -> Session {
+    var n = s
+    let kinds = Tiling.layouts(for: n.windows.count)
+    n.layoutIndex = kinds.isEmpty ? 0 : min(n.layoutIndex, kinds.count - 1)
+    n.order = Array(0..<n.windows.count)
+    return n
+  }
+
+  /// On mouse-up: move any window that was dragged from one boxed display onto
+  /// another boxed display into that display's layout (auto-format), and reflow
+  /// the source. A window dragged to a non-boxed display is simply released.
+  func reconcileDisplays() {
+    guard !sessions.isEmpty else { return }
+
+    // Collect windows that left their session's display.
+    var movers: [(window: AXUIElement, from: CGDirectDisplayID, dest: CGDirectDisplayID?)] = []
+    for (id, s) in sessions {
+      guard let screen = screen(forID: id) else { continue }
+      for w in s.windows where !(frame(of: w).map { screenContains(screen, $0) } ?? false) {
+        let dest = currentScreen(of: w).map { displayID($0) }
+        movers.append((w, id, dest))
+      }
+    }
+    guard !movers.isEmpty else { return }
+
+    var touched = Set<CGDirectDisplayID>()
+    for m in movers {
+      // Remove from source.
+      if var src = sessions[m.from] {
+        src.windows.removeAll { CFEqual($0, m.window) }
+        sessions[m.from] = src.windows.isEmpty ? nil : normalized(src)
+        touched.insert(m.from)
+      }
+      // Join the destination if it's also boxed; otherwise leave it free.
+      if let dest = m.dest, dest != m.from, sessions[dest] != nil {
+        sessions[dest]?.windows.append(m.window)
+        sessions[dest] = normalized(sessions[dest]!)
+        touched.insert(dest)
+        Log.write("auto-formatted window from display \(m.from) → \(dest)")
+      } else {
+        Log.write("released window from display \(m.from) (destination not boxed)")
+      }
+    }
+    for id in touched { if let s = sessions[id] { applyLayout(s) } }
   }
 
   // MARK: - Window discovery
@@ -765,6 +825,29 @@ final class WindowManager {
   private func screenContains(_ screen: NSScreen, _ axRect: CGRect) -> Bool {
     let cocoa = axToCocoa(axRect)
     return screen.frame.contains(CGPoint(x: cocoa.midX, y: cocoa.midY))
+  }
+
+  // MARK: - Displays
+
+  func displayID(_ screen: NSScreen) -> CGDirectDisplayID {
+    (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
+      ?? 0
+  }
+
+  private func screen(forID id: CGDirectDisplayID) -> NSScreen? {
+    NSScreen.screens.first { displayID($0) == id }
+  }
+
+  /// The display the cursor is currently on (where organize/edit should target).
+  func screenUnderCursor() -> NSScreen? {
+    let point = NSEvent.mouseLocation
+    return NSScreen.screens.first { $0.frame.contains(point) } ?? NSScreen.main
+  }
+
+  /// Which display a window currently sits on (by its center), if any.
+  private func currentScreen(of window: AXUIElement) -> NSScreen? {
+    guard let f = frame(of: window) else { return nil }
+    return NSScreen.screens.first { screenContains($0, f) }
   }
 
   // MARK: - Live window events
