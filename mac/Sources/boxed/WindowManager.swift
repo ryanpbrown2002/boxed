@@ -42,6 +42,9 @@ final class WindowManager {
 
   /// A divider was dragged this session, so the next mouse-up should snap clean.
   private var ratioDirty = false
+  /// True while a splitter handle is being dragged — pauses auto-reflow so windows
+  /// don't jump mid-adjust.
+  private(set) var draggingSplitter = false
   /// Windows boxed just resized, so their resize echoes can be ignored (vs. a
   /// genuine user drag). Pairs of (window, ignore-until).
   private var recentlySized: [(window: AXUIElement, until: DispatchTime)] = []
@@ -69,10 +72,13 @@ final class WindowManager {
       AXUIElementPerformAction(window, kAXRaiseAction as CFString)
       Log.write("raised new window to front")
     }
-    // In edit mode, a new window should just slot into the current layout.
+    // In edit mode, a new window should just slot into the current layout —
+    // unless the user is mid-drag, in which case don't yank things around.
     if editMode {
-      Log.write("new window during edit mode -> reflow")
-      scheduleReflow()
+      if !draggingSplitter {
+        Log.write("new window during edit mode -> reflow")
+        scheduleReflow()
+      }
       return
     }
     guard suggestNewWindows, isTileable(window), let newFrame = frame(of: window) else { return }
@@ -83,7 +89,7 @@ final class WindowManager {
   /// A window (or other UI element) was destroyed. Only relevant in edit mode,
   /// where a closed window should make the rest re-tile to fill the gap.
   func handleWindowClosed() {
-    guard editMode, session != nil else { return }
+    guard editMode, session != nil, !draggingSplitter else { return }
     scheduleReflow()
   }
 
@@ -275,6 +281,66 @@ final class WindowManager {
       setPosition(w, rects[other].origin)
     }
     Log.write("edge drag -> ratio \(String(format: "%.2f", ratio))")
+  }
+
+  // MARK: - Splitter (drag a divider to resize the split)
+
+  func splitterDragBegan() { draggingSplitter = true }
+  func splitterDragEnded() {
+    draggingSplitter = false
+    ratioDirty = false
+  }
+
+  /// The primary divider's frame in Cocoa (bottom-left) coordinates and its
+  /// orientation, or nil if the active layout has no single draggable split.
+  func primaryDividerCocoa() -> (frame: CGRect, vertical: Bool)? {
+    guard let s = session else { return nil }
+    let kinds = Tiling.layouts(for: s.windows.count)
+    guard !kinds.isEmpty else { return nil }
+    guard let vertical = primarySplitVertical(kinds[s.layoutIndex % kinds.count], s.windows.count)
+    else { return nil }
+
+    let usable = usableRect(on: s.screen)
+    let grab: CGFloat = 16
+    let ax: CGRect
+    if vertical {
+      let x = usable.minX + usable.width * s.ratio
+      ax = CGRect(x: x - grab / 2, y: usable.minY, width: grab, height: usable.height)
+    } else {
+      let y = usable.minY + usable.height * s.ratio
+      ax = CGRect(x: usable.minX, y: y - grab / 2, width: usable.width, height: grab)
+    }
+    return (axToCocoa(ax), vertical)
+  }
+
+  /// Resize the split live from a screen-space (Cocoa) cursor point during a drag.
+  func setRatio(fromScreenPoint point: CGPoint) {
+    guard let s = session else { return }
+    let kinds = Tiling.layouts(for: s.windows.count)
+    guard !kinds.isEmpty,
+      let vertical = primarySplitVertical(kinds[s.layoutIndex % kinds.count], s.windows.count)
+    else { return }
+    let usable = usableRect(on: s.screen)
+    let r: CGFloat =
+      vertical
+      ? (point.x - usable.minX) / usable.width
+      : ((primaryHeight() - point.y) - usable.minY) / usable.height
+    setRatio(r)
+  }
+
+  func setRatio(_ r: CGFloat) {
+    guard var s = session else { return }
+    s.ratio = Tiling.clampRatio(r)
+    session = s
+    applySession()
+  }
+
+  private func primarySplitVertical(_ kind: LayoutKind, _ count: Int) -> Bool? {
+    switch kind {
+    case .columns where count == 2, .mainLeft: return true
+    case .rows where count == 2, .mainTop: return false
+    default: return nil
+    }
   }
 
   func currentLayoutName() -> String? {
@@ -482,22 +548,23 @@ final class WindowManager {
     return err == .success && settable.boolValue
   }
 
+  /// Height of the primary display — the reference for converting between the
+  /// Accessibility API's top-left origin and Cocoa's bottom-left origin.
+  private func primaryHeight() -> CGFloat {
+    NSScreen.screens.first(where: { $0.frame.origin == .zero })?.frame.height
+      ?? NSScreen.main?.frame.height ?? 0
+  }
+
   /// Usable area of a display, in the Accessibility API's top-left coordinate space.
   private func usableRect(on screen: NSScreen) -> CGRect {
-    let primaryHeight =
-      NSScreen.screens.first(where: { $0.frame.origin == .zero })?.frame.height
-      ?? screen.frame.height
     let v = screen.visibleFrame
     return CGRect(
-      x: v.minX, y: primaryHeight - (v.minY + v.height), width: v.width, height: v.height)
+      x: v.minX, y: primaryHeight() - (v.minY + v.height), width: v.width, height: v.height)
   }
 
   private func axToCocoa(_ rect: CGRect) -> CGRect {
-    let primaryHeight =
-      NSScreen.screens.first(where: { $0.frame.origin == .zero })?.frame.height
-      ?? NSScreen.main?.frame.height ?? rect.maxY
-    return CGRect(
-      x: rect.minX, y: primaryHeight - rect.minY - rect.height, width: rect.width,
+    CGRect(
+      x: rect.minX, y: primaryHeight() - rect.minY - rect.height, width: rect.width,
       height: rect.height)
   }
 

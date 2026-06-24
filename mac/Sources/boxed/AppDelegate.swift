@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var dragSwapMonitor: Any?
   private let manager = WindowManager()
   private let suggestionPanel = SuggestionPanel()
+  private let splitter = Splitter()
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     Log.write("launched. accessibilityTrusted=\(AXIsProcessTrusted())")
@@ -18,13 +19,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     manager.onNewWindow = { [weak self] anchor in
       self?.showOrganizePill(near: anchor)
     }
-    // Drag-to-swap and auto-reflow are only live while the adjust pill is up.
+    // Drag-to-swap, the splitter, and auto-reflow are only live while editing.
     suggestionPanel.onDismiss = { [weak self] in
       self?.manager.editMode = false
       self?.endDragSwap()
+      self?.splitter.hide()
     }
     // When a window opens/closes during edit mode, re-tile and refresh the pill.
     manager.onReorganized = { [weak self] name in self?.showAdjustPill(layoutName: name) }
+
+    // Splitter handle: drag it to resize the split live; snap clean on release.
+    splitter.onDragTo = { [weak self] point in
+      self?.manager.splitterDragBegan()
+      self?.manager.setRatio(fromScreenPoint: point)
+    }
+    splitter.onEnd = { [weak self] in
+      self?.manager.splitterDragEnded()
+      self?.positionSplitter()
+    }
     manager.start()
     installShortcuts()
     startCommandHook()
@@ -54,6 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private func showAdjustPill(layoutName: String) {
     manager.editMode = true
     beginDragSwap()
+    positionSplitter()
     let swap = WindowSuggestion(label: "⇄ Swap", keepsPanelOpen: true) { [weak self] in
       guard let self else { return }
       self.showAdjustPill(layoutName: self.manager.swap() ?? layoutName)
@@ -64,6 +77,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     suggestionPanel.present(
       title: layoutName, [swap, rebox], near: bottomCenterAnchor(), prominent: true)
+  }
+
+  /// Place the divider handle on the current layout's primary split (or hide it
+  /// when the layout has no single draggable divider).
+  private func positionSplitter() {
+    if let divider = manager.primaryDividerCocoa() {
+      splitter.show(frame: divider.frame, vertical: divider.vertical)
+    } else {
+      splitter.hide()
+    }
   }
 
   /// A point at the bottom-center of the active display — keeps the pill clear of
