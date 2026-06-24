@@ -302,7 +302,37 @@ final class WindowManager {
   /// name if anything changed (so the caller can keep the pill alive), else nil.
   @discardableResult
   func handleWindowDropped() -> String? {
-    guard let s = session, s.windows.count > 1 else { return nil }
+    guard let s = session else { return nil }
+
+    // Released to another display? Any session window now on a different screen is
+    // let go — it stays where you dropped it; the rest reflow to fill the layout.
+    let remaining = s.windows.filter { frame(of: $0).map { screenContains(s.screen, $0) } ?? false }
+    if remaining.count != s.windows.count {
+      Log.write("released \(s.windows.count - remaining.count) window(s) to another display")
+      ratioDirty = false
+      guard !remaining.isEmpty else {
+        session = nil
+        return nil
+      }
+      let kinds = Tiling.layouts(for: remaining.count)
+      session = Session(
+        windows: remaining, screen: s.screen,
+        layoutIndex: min(s.layoutIndex, max(0, kinds.count - 1)),
+        order: Array(0..<remaining.count), ratio: s.ratio, stackRatio: s.stackRatio,
+        insetTop: s.insetTop, insetBottom: s.insetBottom, insetLeft: s.insetLeft,
+        insetRight: s.insetRight)
+      applySession()
+      return currentLayoutName()
+    }
+
+    guard s.windows.count > 1 else {
+      if ratioDirty {
+        ratioDirty = false
+        applySession()
+        return currentLayoutName()
+      }
+      return nil
+    }
     let count = s.windows.count
     let kinds = Tiling.layouts(for: count)
     guard !kinds.isEmpty else { return nil }
