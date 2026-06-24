@@ -68,9 +68,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     showAdjustPill(layoutName: name)
   }
 
-  /// Stage 2: a small pill, parked bottom-center, to tweak the arrangement.
-  /// Rebox cycles to the next layout; swapping is handled by dragging a window
-  /// onto another. Each press re-tiles and refreshes the pill (resets its fade).
+  /// Stage 2: a small pill that drops down under the menubar ▣ to tweak the
+  /// arrangement. Rebox cycles to the next layout; swapping is by dragging a
+  /// window onto another. Each press re-tiles and refreshes the pill (resets fade).
   private func showAdjustPill(layoutName: String) {
     manager.editMode = true
     beginDragSwap()
@@ -79,8 +79,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       guard let self else { return }
       self.showAdjustPill(layoutName: self.manager.rebox() ?? layoutName)
     }
-    suggestionPanel.present(
-      title: nil, [rebox], near: bottomCenterAnchor(), prominent: true)
+    suggestionPanel.present(title: nil, [rebox], near: menubarAnchor(), prominent: true)
+  }
+
+  /// A point just under the boxed menubar icon, so the pill reads as belonging to
+  /// boxed and never covers the content area. Falls back to bottom-center.
+  private func menubarAnchor() -> CGRect {
+    if let frame = statusItem.button?.window?.frame {
+      return CGRect(x: frame.midX, y: frame.minY, width: 0, height: 0)
+    }
+    return bottomCenterAnchor()
   }
 
   /// Place each divider handle on its split (hiding any unused handles).
