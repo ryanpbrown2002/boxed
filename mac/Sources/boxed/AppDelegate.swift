@@ -1,9 +1,10 @@
 import AppKit
 import ApplicationServices
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private var statusItem: NSStatusItem!
   private var suggestItem: NSMenuItem!
+  private var organizeItem: NSMenuItem!
   private var hotKeyMonitor: Any?
   private var rightClickMonitor: Any?
   private var dragSwapMonitor: Any?
@@ -53,7 +54,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   /// Stage 1: the "Organize tabs" prompt near a new window. Clicking it tiles
   /// everything, then brings up the adjust pill.
   private func showOrganizePill(near anchor: CGRect) {
-    let organize = WindowSuggestion(label: "⧉  Organize tabs") { [weak self] in
+    let label = manager.isAlreadyOrganized() ? "✎  Edit tabs" : "⧉  Organize tabs"
+    let organize = WindowSuggestion(label: label) { [weak self] in
       self?.organizeAndAdjust()
     }
     Log.write("presenting organize pill near \(NSStringFromRect(anchor))")
@@ -173,12 +175,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     statusItem.button?.title = "▣"
 
     let menu = NSMenu()
+    menu.delegate = self  // refresh the organize item each time the menu opens
+    menu.autoenablesItems = false
 
-    let organizeNow = NSMenuItem(
+    organizeItem = NSMenuItem(
       title: "Organize tabs now", action: #selector(organizeNow), keyEquivalent: "t")
-    organizeNow.keyEquivalentModifierMask = [.command, .option]
-    organizeNow.target = self
-    menu.addItem(organizeNow)
+    organizeItem.keyEquivalentModifierMask = [.command, .option]
+    organizeItem.target = self
+    menu.addItem(organizeItem)
 
     menu.addItem(.separator())
 
@@ -199,6 +203,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         title: "Quit boxed", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
     statusItem.menu = menu
+  }
+
+  /// Keep the organize item in step with what's on screen: disabled when there
+  /// are no windows to act on, and labeled "Edit tabs" when they're already tiled.
+  func menuNeedsUpdate(_ menu: NSMenu) {
+    let count = manager.tileableCount()
+    organizeItem.isEnabled = count >= 1
+    organizeItem.title = manager.isAlreadyOrganized() ? "Edit tabs" : "Organize tabs now"
   }
 
   @objc private func toggleSuggest() {

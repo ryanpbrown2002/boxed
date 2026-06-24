@@ -83,6 +83,12 @@ final class WindowManager {
       return
     }
     guard suggestNewWindows, isTileable(window), let newFrame = frame(of: window) else { return }
+    // Only offer to organize when there's already another window to tile with —
+    // the first window on an empty Space has nothing to arrange against.
+    guard tileableCount() >= 2 else {
+      Log.write("first window on screen — no organize pill")
+      return
+    }
     Log.write("new window -> offering organize")
     onNewWindow?(axToCocoa(newFrame))
   }
@@ -177,6 +183,23 @@ final class WindowManager {
   private func sameWindowSet(_ a: [AXUIElement], _ b: [AXUIElement]) -> Bool {
     guard a.count == b.count else { return false }
     return b.allSatisfy { w in a.contains { CFEqual($0, w) } }
+  }
+
+  /// How many tileable windows are on the active display right now.
+  func tileableCount() -> Int {
+    guard let screen = NSScreen.main ?? NSScreen.screens.first else { return 0 }
+    return tileableWindows().filter { frame(of: $0).map { screenContains(screen, $0) } ?? false }
+      .count
+  }
+
+  /// Are the on-screen windows already the ones in the current session (so the
+  /// action would just re-align/edit rather than organize fresh)?
+  func isAlreadyOrganized() -> Bool {
+    guard let s = session, let screen = NSScreen.main ?? NSScreen.screens.first else { return false }
+    let onScreen = tileableWindows().filter {
+      frame(of: $0).map { screenContains(screen, $0) } ?? false
+    }
+    return !onScreen.isEmpty && sameWindowSet(s.windows, onScreen)
   }
 
   /// Re-assign windows to the current layout's slots by nearest position — each
