@@ -69,22 +69,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   }
 
   /// Stage 2: a small pill, parked bottom-center, to tweak the arrangement.
-  /// Swap rotates which window sits where; Rebox cycles to the next layout. Each
-  /// press re-tiles and refreshes the pill (resetting its fade timer).
+  /// Rebox cycles to the next layout; swapping is handled by dragging a window
+  /// onto another. Each press re-tiles and refreshes the pill (resets its fade).
   private func showAdjustPill(layoutName: String) {
     manager.editMode = true
     beginDragSwap()
     positionSplitters()
-    let swap = WindowSuggestion(label: "⇄ Swap", keepsPanelOpen: true) { [weak self] in
-      guard let self else { return }
-      self.showAdjustPill(layoutName: self.manager.swap() ?? layoutName)
-    }
     let rebox = WindowSuggestion(label: "▦ Rebox", keepsPanelOpen: true) { [weak self] in
       guard let self else { return }
       self.showAdjustPill(layoutName: self.manager.rebox() ?? layoutName)
     }
     suggestionPanel.present(
-      title: layoutName, [swap, rebox], near: bottomCenterAnchor(), prominent: true)
+      title: layoutName, [rebox], near: bottomCenterAnchor(), prominent: true)
   }
 
   /// Place each divider handle on its split (hiding any unused handles).
