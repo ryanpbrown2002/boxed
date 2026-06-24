@@ -41,6 +41,20 @@ public enum Tiling {
     }
   }
 
+  /// The largest fraction of the display (in each dimension) a window can be and
+  /// still count as "compact" — i.e. small enough to keep its natural size and
+  /// tuck into a corner rather than be stretched to fill its slot.
+  public static let compactFraction: CGFloat = 0.45
+
+  /// Is `size` a "compact" window on a display of `screen` size? True only when it
+  /// is under `compactFraction` of the display in BOTH width and height, so a
+  /// near-half window (which should still fill) is not treated as compact.
+  public static func isCompact(_ size: CGSize, in screen: CGSize) -> Bool {
+    guard size.width > 0, size.height > 0, screen.width > 0, screen.height > 0 else { return false }
+    return size.width < screen.width * compactFraction
+      && size.height < screen.height * compactFraction
+  }
+
   /// The ordered slot rectangles for `count` windows under `kind`, within `rect`,
   /// separated by `gap`. Always returns exactly `count` rects.
   public static func slots(_ kind: LayoutKind, count: Int, in rect: CGRect, gap: CGFloat = 8)

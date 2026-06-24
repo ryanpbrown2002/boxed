@@ -350,7 +350,7 @@ final class WindowManager {
   private func place(_ window: AXUIElement, in slot: CGRect, usable: CGRect) {
     let natural = naturalSize(of: window)
     let settable = isSizeSettable(window)
-    let small = natural.width < usable.width * 0.5 && natural.height < usable.height * 0.5
+    let small = Tiling.isCompact(natural, in: usable.size)
 
     if (small || !settable), natural.width > 0, natural.height > 0 {
       // Keep the natural size, anchored top-right of the slot (AX origin is
@@ -378,8 +378,7 @@ final class WindowManager {
   }
 
   private func isSmall(_ window: AXUIElement, _ usable: CGRect) -> Bool {
-    let size = naturalSize(of: window)
-    return size.width < usable.width * 0.5 && size.height < usable.height * 0.5
+    Tiling.isCompact(naturalSize(of: window), in: usable.size)
   }
 
   private func setPosition(_ window: AXUIElement, _ origin: CGPoint) {

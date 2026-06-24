@@ -49,6 +49,19 @@ When adding a feature with non-trivial logic, add or update a unit test in
 `tests/unit`. When adding user-visible flows, consider extending the Playwright
 smoke test in `tests/e2e`.
 
+## Test-driven development (do this)
+
+When fixing a bug or adding logic with a testable core, write the test FIRST:
+
+1. Extract the decision into pure code in `mac/Sources/BoxedKit` (no AppKit/AX).
+2. Add a failing test in `mac/Tests/BoxedKitTests`; run `./scripts/test.sh` and
+   watch it go red.
+3. Implement until green. Don't edit the test to fit a wrong implementation.
+
+If the behavior is inherently AppKit / Accessibility / window-server (z-order,
+focus, real window placement) it can't be a pure unit test — verify it through the
+`/tmp/boxed-cmd` hook + `CGWindowList` inspection instead, and say so explicitly.
+
 ## Git workflow
 
 - Small, focused commits. Conventional-commit style prefixes: `feat:`, `fix:`,

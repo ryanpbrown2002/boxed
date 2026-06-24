@@ -6,6 +6,20 @@ import XCTest
 final class TilingTests: XCTestCase {
   let rect = CGRect(x: 0, y: 0, width: 1000, height: 600)
 
+  // MARK: "compact" (don't-stretch) detection
+
+  func testCompactDetection() {
+    let screen = CGSize(width: 1710, height: 1069)
+    // Genuinely small windows (e.g. a small Preview) are compact…
+    XCTAssertTrue(Tiling.isCompact(CGSize(width: 708, height: 276), in: screen))
+    XCTAssertTrue(Tiling.isCompact(CGSize(width: 400, height: 300), in: screen))
+    // …but a near-half window is NOT — the stricter threshold excludes it.
+    XCTAssertFalse(Tiling.isCompact(CGSize(width: 847, height: 488), in: screen))
+    // Full-screen and full-width windows are never compact.
+    XCTAssertFalse(Tiling.isCompact(screen, in: screen))
+    XCTAssertFalse(Tiling.isCompact(CGSize(width: 1600, height: 200), in: screen))
+  }
+
   // MARK: which layouts are offered per count
 
   func testLayoutsPerCount() {
