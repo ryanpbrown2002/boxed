@@ -64,11 +64,22 @@ arranges the user's *real* OS windows; it does not embed anything. The Electron 
 at the repo root is **parked** — an earlier "container" approach — kept for
 reference but not the active product. Don't add features to it without being asked.
 
+**Core principle — suggest, don't force.** boxed must NOT auto-rearrange windows
+or disrupt the normal macOS workflow. When a new window opens it offers a small,
+transient, non-activating prompt with context-aware placement options; if the user
+ignores it, nothing moves. The only en-masse action is the explicit, user-invoked
+"Tidy all". Do not reintroduce automatic tiling as a default.
+
 For the native app:
 
-- Pure tiling math lives in `mac/Sources/boxed/Layout.swift` — no window/AppKit
-  APIs in there, so it stays testable. Keep it that way.
-- All window manipulation goes through the Accessibility API in `WindowManager`.
+- Pure geometry lives in `Suggester.swift` (which options to offer) and
+  `Layout.swift` (BSP math) — no window/AppKit APIs in there, so they stay
+  testable. Keep it that way. Verify with a standalone `swiftc` check.
+- All window manipulation goes through the Accessibility API in `WindowManager`,
+  which acts only on a user's suggestion click or Tidy all — never on its own.
+- The prompt (`SuggestionPanel`) is a non-activating `NSPanel` that auto-dismisses.
+  Keep it unobtrusive; it doubles as boxed's only "presence" (no separate
+  on-indicator by design).
 - It's a menubar agent (`LSUIElement`, `.accessory` activation) — no dock icon,
   no main window. Keep it that way; "gets out of the way" still rules.
 - Build with `cd mac && ./scripts/make-app.sh`. Verify `swift build` compiles

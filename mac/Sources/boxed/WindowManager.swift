@@ -1,53 +1,76 @@
 import AppKit
 import ApplicationServices
 
-/// Finds the user's real windows, tiles them to fill the active display, and
-/// reflows whenever a window opens or closes. Tier 1: needs only Accessibility
-/// permission — no SIP changes.
+/// Watches for newly-opened windows and, when one appears, asks the delegate to
+/// offer placement suggestions. It does NOT move anything on its own — that's the
+/// whole point: boxed stays out of the normal macOS workflow until you opt in by
+/// clicking a suggestion. `tidyAll()` is the one exception, and only runs when the
+/// user explicitly invokes it.
 final class WindowManager {
-  var autoTile = true
+  /// When true, a prompt appears near each newly-opened window. Default behavior.
+  var suggestNewWindows = true
   var gap: CGFloat = 8
 
+  /// Called on the main thread when a new window should offer suggestions.
+  /// `anchor` is the new window's frame in Cocoa (bottom-left) coordinates.
+  var onSuggest: ((_ suggestions: [WindowSuggestion], _ anchor: CGRect) -> Void)?
+
   private var observers: [pid_t: AXObserver] = [:]
-  private var pendingTile = false
 
   func start() {
     let nc = NSWorkspace.shared.notificationCenter
     for name in [
       NSWorkspace.didLaunchApplicationNotification,
-      NSWorkspace.didTerminateApplicationNotification,
       NSWorkspace.didActivateApplicationNotification
     ] {
       nc.addObserver(self, selector: #selector(appsChanged), name: name, object: nil)
     }
     observeRunningApps()
-    tile()
   }
 
   @objc private func appsChanged(_ note: Notification) {
     observeRunningApps()
-    scheduleTile()
   }
 
-  // MARK: - Tiling
+  // MARK: - New-window suggestions
 
-  /// Recompute and apply frames for every tileable window on the active display.
-  func tile() {
-    let windows = tileableWindows()
-    guard !windows.isEmpty else { return }
-    let frames = Layout.bsp(count: windows.count, in: usableRect(), gap: gap)
-    for (window, frame) in zip(windows, frames) {
-      setFrame(window, frame)
+  /// Invoked (on the main thread) shortly after a window is created, once it has
+  /// had a moment to settle into its initial size.
+  func handleWindowCreated(_ window: AXUIElement) {
+    guard suggestNewWindows, isTileable(window), let newFrame = frame(of: window) else { return }
+
+    let screen = screen(forAX: newFrame)
+    let usable = usableRect(on: screen)
+    let incumbent = largestOtherWindow(excluding: window, on: screen)
+    let incumbentFrame = incumbent.flatMap { frame(of: $0) }
+
+    let placements = Suggester.placements(usable: usable, incumbent: incumbentFrame, gap: gap)
+    guard !placements.isEmpty else { return }
+
+    let suggestions = placements.map { placement in
+      WindowSuggestion(label: placement.label) { [weak self] in
+        guard let self else { return }
+        self.setFrame(window, placement.newFrame)
+        if let incumbent, let incumbentFrame = placement.incumbentFrame {
+          self.setFrame(incumbent, incumbentFrame)
+        }
+      }
     }
+    onSuggest?(suggestions, axToCocoa(newFrame))
   }
 
-  /// Coalesce bursts of AX events into a single tile pass.
-  func scheduleTile() {
-    guard autoTile, !pendingTile else { return }
-    pendingTile = true
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
-      self?.pendingTile = false
-      self?.tile()
+  // MARK: - Manual tidy (user-initiated only)
+
+  /// Tile every window on the active display into a BSP layout. Only called from
+  /// the menubar item / hotkey — never automatically.
+  func tidyAll() {
+    let screen = NSScreen.main ?? NSScreen.screens.first
+    guard let screen else { return }
+    let windows = tileableWindows().filter { frame(of: $0).map { screenContains(screen, $0) } ?? false }
+    guard !windows.isEmpty else { return }
+    let frames = Layout.bsp(count: windows.count, in: usableRect(on: screen), gap: gap)
+    for (window, rect) in zip(windows, frames) {
+      setFrame(window, rect)
     }
   }
 
@@ -83,6 +106,37 @@ final class WindowManager {
     return true
   }
 
+  private func largestOtherWindow(excluding target: AXUIElement, on screen: NSScreen)
+    -> AXUIElement?
+  {
+    tileableWindows()
+      .filter { !CFEqual($0, target) }
+      .compactMap { window -> (AXUIElement, CGFloat)? in
+        guard let f = frame(of: window), screenContains(screen, f) else { return nil }
+        return (window, f.width * f.height)
+      }
+      .max(by: { $0.1 < $1.1 })?.0
+  }
+
+  // MARK: - Geometry
+
+  private func frame(of window: AXUIElement) -> CGRect? {
+    var posRef: CFTypeRef?
+    var sizeRef: CFTypeRef?
+    guard
+      AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &posRef) == .success,
+      AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &sizeRef) == .success,
+      let posRef, let sizeRef,
+      CFGetTypeID(posRef) == AXValueGetTypeID(), CFGetTypeID(sizeRef) == AXValueGetTypeID()
+    else { return nil }
+
+    var point = CGPoint.zero
+    var size = CGSize.zero
+    AXValueGetValue(posRef as! AXValue, .cgPoint, &point)
+    AXValueGetValue(sizeRef as! AXValue, .cgSize, &size)
+    return CGRect(origin: point, size: size)
+  }
+
   private func setFrame(_ window: AXUIElement, _ rect: CGRect) {
     var origin = rect.origin
     var size = rect.size
@@ -94,17 +148,38 @@ final class WindowManager {
     }
   }
 
-  /// The usable area of the active display, converted to the top-left origin
-  /// coordinate space the Accessibility API expects.
-  private func usableRect() -> CGRect {
-    guard let screen = NSScreen.main ?? NSScreen.screens.first else { return .zero }
-    let full = screen.frame
-    let visible = screen.visibleFrame
-    let axY = full.height - (visible.origin.y + visible.height) // = menu-bar height
-    return CGRect(x: visible.origin.x, y: axY, width: visible.width, height: visible.height)
+  /// Usable area of a display, in the Accessibility API's top-left coordinate space.
+  private func usableRect(on screen: NSScreen) -> CGRect {
+    let primaryHeight =
+      NSScreen.screens.first(where: { $0.frame.origin == .zero })?.frame.height
+      ?? screen.frame.height
+    let v = screen.visibleFrame
+    return CGRect(x: v.minX, y: primaryHeight - (v.minY + v.height), width: v.width, height: v.height)
   }
 
-  // MARK: - Live window events (open / close / focus)
+  /// Convert a top-left (Accessibility) rect to a bottom-left (Cocoa) rect.
+  private func axToCocoa(_ rect: CGRect) -> CGRect {
+    let primaryHeight =
+      NSScreen.screens.first(where: { $0.frame.origin == .zero })?.frame.height
+      ?? NSScreen.main?.frame.height ?? rect.maxY
+    return CGRect(
+      x: rect.minX, y: primaryHeight - rect.minY - rect.height, width: rect.width,
+      height: rect.height)
+  }
+
+  private func screen(forAX rect: CGRect) -> NSScreen {
+    let cocoa = axToCocoa(rect)
+    let center = CGPoint(x: cocoa.midX, y: cocoa.midY)
+    return NSScreen.screens.first(where: { $0.frame.contains(center) }) ?? NSScreen.main
+      ?? NSScreen.screens[0]
+  }
+
+  private func screenContains(_ screen: NSScreen, _ axRect: CGRect) -> Bool {
+    let cocoa = axToCocoa(axRect)
+    return screen.frame.contains(CGPoint(x: cocoa.midX, y: cocoa.midY))
+  }
+
+  // MARK: - Live window events
 
   private func observeRunningApps() {
     let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
@@ -117,24 +192,22 @@ final class WindowManager {
     guard observers[pid] == nil else { return }
 
     var observer: AXObserver?
-    let callback: AXObserverCallback = { _, _, _, refcon in
+    let callback: AXObserverCallback = { _, element, notification, refcon in
       guard let refcon else { return }
       let manager = Unmanaged<WindowManager>.fromOpaque(refcon).takeUnretainedValue()
-      manager.scheduleTile()
+      guard (notification as String) == (kAXWindowCreatedNotification as String) else { return }
+      let window = element
+      // Let the app finish sizing the window before we read its frame.
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+        manager.handleWindowCreated(window)
+      }
     }
     guard AXObserverCreate(pid, callback, &observer) == .success, let observer else { return }
 
     let appElement = AXUIElementCreateApplication(pid)
     let refcon = Unmanaged.passUnretained(self).toOpaque()
-    for notification in [
-      kAXWindowCreatedNotification,
-      kAXUIElementDestroyedNotification,
-      kAXFocusedWindowChangedNotification
-    ] {
-      AXObserverAddNotification(observer, appElement, notification as CFString, refcon)
-    }
-    CFRunLoopAddSource(
-      CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
+    AXObserverAddNotification(observer, appElement, kAXWindowCreatedNotification as CFString, refcon)
+    CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
     observers[pid] = observer
   }
 }

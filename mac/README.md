@@ -1,8 +1,10 @@
 # boxed (native macOS)
 
-A menubar tiling window manager. Grabs your real windows, tiles them BSP-style to
-fill the active display, and **reflows automatically** when a window opens or
-closes. Tier 1: needs only Accessibility permission — no SIP changes.
+A menubar helper that stays out of your way. It does **not** auto-arrange your
+windows. Instead, when you open a new window, a small tooltip-style prompt appears
+near it — *"Snap into layout?"* — with a couple of context-aware options. Click one
+to place the window; ignore it and it disappears on its own, leaving the window
+exactly where macOS put it. Tier 1: needs only Accessibility permission, no SIP.
 
 ## Build & run
 
@@ -12,47 +14,60 @@ cd mac
 open boxed.app
 ```
 
-On first launch macOS will prompt for **Accessibility** permission (or grant it
-in **System Settings → Privacy & Security → Accessibility**, toggle `boxed` on).
+On first launch macOS prompts for **Accessibility** permission (or grant it in
+**System Settings → Privacy & Security → Accessibility**, toggle `boxed` on).
 Window control is impossible without it. After granting, relaunch:
 
 ```bash
 killall boxed 2>/dev/null; open boxed.app
 ```
 
-You'll see a `▣` in the menubar:
+Then open a new window somewhere and the prompt should appear next to it.
 
-- **Tile now** — tile the current windows immediately.
-- **Auto-tile** — toggle live reflow on window open/close.
-- **⌥⌘T** — global re-tile hotkey from anywhere.
-- **Quit boxed**.
+## What it does
 
-> Heads up: turning this on rearranges every standard window on your active
-> display. That's the point — but expect your windows to jump on first run.
+- **Suggests, never forces.** A transient, non-activating prompt near each newly
+  opened window. It steals no focus and auto-dismisses after a few seconds.
+- **Context-aware options.** If one window already fills the screen, you get
+  *Split* choices (placing the newcomer beside it and nudging the incumbent to the
+  other half). Otherwise you get quick spots (*Left / Right / Fill*).
+- **Menubar `▣`:**
+  - **Suggest layouts for new windows** — toggle the prompt on/off.
+  - **Tidy all windows (⌥⌘T)** — the one *active* command: BSP-tile everything on
+    the current display. User-initiated only; also bound to the global hotkey.
+  - **Quit boxed**.
+
+> Normal macOS workflow is untouched: opening apps behaves exactly as before
+> unless you click a suggestion. Only **Tidy all** moves windows en masse.
+
+## Code map
+
+- [`Suggester.swift`](Sources/boxed/Suggester.swift) — pure geometry that decides
+  which placement options to offer (verified with a standalone `swiftc` check).
+- [`SuggestionPanel.swift`](Sources/boxed/SuggestionPanel.swift) — the transient
+  prompt (non-activating `NSPanel`, auto-dismiss, screen-clamped positioning).
+- [`WindowManager.swift`](Sources/boxed/WindowManager.swift) — discovers windows,
+  watches for new ones (`AXObserver`), applies frames. Holds no opinions of its
+  own; only acts on your clicks (or Tidy all).
+- [`Layout.swift`](Sources/boxed/Layout.swift) — pure BSP math used by Tidy all.
+- [`AppDelegate.swift`](Sources/boxed/AppDelegate.swift) — menubar, permission
+  prompt, hotkey.
 
 ## Dev
 
 ```bash
 swift build                  # debug build
-swift run boxed              # run from the terminal (also rearranges windows)
 ```
 
-## Layout model
+## Known limitations / things to play with
 
-[`Sources/boxed/Layout.swift`](Sources/boxed/Layout.swift) holds the pure tiling
-math (no window APIs), so it can be reasoned about and checked in isolation.
-Frames are recomputed purely from the current window count, which is what makes
-reflow free — there's no tree state to keep in sync.
-
-- [`WindowManager.swift`](Sources/boxed/WindowManager.swift) — discovers windows
-  (Accessibility API), applies frames, and observes open/close/focus events.
-- [`AppDelegate.swift`](Sources/boxed/AppDelegate.swift) — menubar, permission
-  prompt, hotkey.
-
-## Known limitations (Phase 1)
-
-- Active display only; doesn't move windows across Spaces (that's Phase 2 / SIP).
-- Tiling order follows app/window enumeration order; no manual reordering yet.
-- No persisted layouts or per-app float rules yet.
-- Requires full Xcode to run `swift test` with XCTest; the layout math is
-  currently verified with a standalone `swiftc` check.
+- Suggestions consider the single largest existing window; richer "fit into the
+  free space" logic is the obvious next experiment.
+- A new window opened by an app that *just* launched can be missed (we attach the
+  observer a beat after launch).
+- No persisted layouts, manual reorder, or "managed set reflows when a window
+  closes" yet — that auto-reflow-on-close idea is a natural follow-up for windows
+  you explicitly snapped.
+- Active display only; cross-Space moves are Phase 2 (SIP).
+- `swift test`/XCTest needs full Xcode (CLT only here); pure logic is verified via
+  standalone `swiftc` checks.
