@@ -204,7 +204,11 @@ final class WindowManager {
     let onScreen = tileableWindows().filter {
       frame(of: $0).map { screenContains(screen, $0) } ?? false
     }
-    guard !onScreen.isEmpty else { return nil }
+    // Nothing to arrange with a single window — don't tile it to "Full".
+    guard onScreen.count >= 2 else {
+      Log.write("only one window on this display — not organizing")
+      return nil
+    }
 
     if let s = session, sameWindowSet(s.windows, onScreen) {
       Log.write("re-align (already organized) — keeping \(currentLayoutName() ?? "layout")")
@@ -880,24 +884,6 @@ final class WindowManager {
     return fullscreenWindow(on: screen) != nil
   }
 
-  /// Drop the fullscreen window out of fullscreen and snap it to the left half,
-  /// so it's usable (and boxable) again.
-  func minimizeFullscreenWindow() {
-    guard let screen = screenUnderCursor(), let window = fullscreenWindow(on: screen) else { return }
-    Log.write("exiting fullscreen → snapping left")
-    AXUIElementSetAttributeValue(
-      window, "AXFullScreen" as CFString, kCFBooleanFalse)
-    // Let the exit animation finish before placing it.
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-      guard let self else { return }
-      let usable = self.usableRect(on: screen)
-      let left = CGRect(
-        x: usable.minX, y: usable.minY, width: (usable.width - self.gap) / 2, height: usable.height)
-      self.setPosition(window, left.origin)
-      self.setSize(window, left.size)
-      self.setPosition(window, left.origin)
-    }
-  }
 
   // MARK: - Live window events
 

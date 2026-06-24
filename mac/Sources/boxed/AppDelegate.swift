@@ -238,21 +238,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   /// Keep the organize item in step with what's on screen: disabled when there
   /// are no windows to act on, and labeled "Edit tabs" when they're already tiled.
   func menuNeedsUpdate(_ menu: NSMenu) {
-    if manager.isFullscreenContext() {
-      // Can't tile a fullscreen Space — offer to drop out of it instead.
-      organizeItem.title = "Minimize window"
-      organizeItem.isEnabled = true
-      organizeItem.action = #selector(minimizeFullscreen)
-      return
-    }
-    organizeItem.action = #selector(organizeNow)
-    let count = manager.tileableCount()
-    organizeItem.isEnabled = count >= 1
-    organizeItem.title = manager.isAlreadyOrganized() ? "Edit tabs" : "Organize tabs now"
-  }
-
-  @objc private func minimizeFullscreen() {
-    manager.minimizeFullscreenWindow()
+    // Need at least two windows to arrange, and a fullscreen Space can't be tiled.
+    let canOrganize = manager.tileableCount() >= 2 && !manager.isFullscreenContext()
+    organizeItem.isEnabled = canOrganize
+    organizeItem.title =
+      (canOrganize && manager.isAlreadyOrganized()) ? "Edit tabs" : "Organize tabs now"
   }
 
   @objc private func toggleSuggest() {
