@@ -72,13 +72,14 @@ ignores it, nothing moves. The only en-masse action is the explicit, user-invoke
 
 For the native app:
 
-- The new-window pill offers a single **Organize** action that calls
-  `WindowManager.tidyAll()` (BSP-tile every window on the active display). The
-  layout is derived from window count, so "more windows = denser layout" falls out
-  for free. Don't auto-apply it — it fires only on the user's click/shortcut.
-- Pure BSP math lives in `Layout.swift` — no window/AppKit APIs in there, so it
-  stays testable. Keep it that way. Verify with a standalone `swiftc` check
-  (full Xcode isn't installed, so `swift test`/XCTest won't run here).
+- **Layout system lives in `Sources/BoxedKit` (pure, tested).** `Tiling.swift`
+  decides which layouts each window count offers, their names, and slot geometry;
+  `Layout.swift` is the BSP fallback for 5+. No AppKit/window APIs in BoxedKit —
+  keep it that way so it stays unit-testable.
+- The flow is two-stage: **Organize** tiles all windows on the active display with
+  the default layout for that count; then **Swap** (rotate window→slot) and
+  **Rebox** (cycle layout) let the user adjust. This is the `WindowManager`
+  "organize session." Don't auto-apply — it fires only on a click/shortcut.
 - All window manipulation goes through the Accessibility API in `WindowManager`,
   which acts only on a user's click or shortcut — never on its own.
 - The pill (`SuggestionPanel`) is a non-activating `NSPanel` that lingers then
@@ -88,6 +89,9 @@ For the native app:
 - **Signing:** `scripts/setup-signing.sh` creates a stable self-signed identity so
   the Accessibility grant persists across rebuilds. `make-app.sh` uses it if
   present. Don't go back to ad-hoc-only — it forces a re-grant every build.
+- **Tests:** `scripts/test.sh` runs the XCTest suite (it locates a full Xcode and
+  sets `DEVELOPER_DIR`, since the Command Line Tools can't run `swift test`). Add a
+  test in `Tests/BoxedKitTests` whenever you touch layout logic.
 - `Log.swift` writes to `/tmp/boxed.log`; use it to debug `open`-launched builds.
 - It's a menubar agent (`LSUIElement`, `.accessory` activation) — no dock icon,
   no main window. Keep it that way; "gets out of the way" still rules.

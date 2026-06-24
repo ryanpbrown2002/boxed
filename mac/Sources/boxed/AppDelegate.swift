@@ -21,16 +21,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     installShortcuts()
   }
 
-  // MARK: - The organize pill
+  // MARK: - The organize flow
 
-  /// Show the transient "Organize tabs" prompt. Clicking it tiles every window on
-  /// the active display — the layout adapts to the window count automatically.
+  /// Stage 1: the "Organize tabs" prompt near a new window. Clicking it tiles
+  /// everything, then brings up the adjust pill.
   private func showOrganizePill(near anchor: CGRect) {
     let organize = WindowSuggestion(label: "⧉  Organize tabs") { [weak self] in
-      self?.manager.tidyAll()
+      self?.organizeAndAdjust()
     }
     Log.write("presenting organize pill near \(NSStringFromRect(anchor))")
-    suggestionPanel.present([organize], near: anchor)
+    suggestionPanel.present(title: nil, [organize], near: anchor)
+  }
+
+  /// Tile the windows, then (if any moved) show the adjust pill out of the way.
+  private func organizeAndAdjust() {
+    guard let name = manager.organize() else { return }
+    showAdjustPill(layoutName: name)
+  }
+
+  /// Stage 2: a small pill, parked bottom-center, to tweak the arrangement.
+  /// Swap rotates which window sits where; Rebox cycles to the next layout. Each
+  /// press re-tiles and refreshes the pill (resetting its fade timer).
+  private func showAdjustPill(layoutName: String) {
+    let swap = WindowSuggestion(label: "⇄ Swap", keepsPanelOpen: true) { [weak self] in
+      guard let self else { return }
+      self.showAdjustPill(layoutName: self.manager.swap() ?? layoutName)
+    }
+    let rebox = WindowSuggestion(label: "▦ Rebox", keepsPanelOpen: true) { [weak self] in
+      guard let self else { return }
+      self.showAdjustPill(layoutName: self.manager.rebox() ?? layoutName)
+    }
+    suggestionPanel.present(title: layoutName, [swap, rebox], near: bottomCenterAnchor())
+  }
+
+  private func bottomCenterAnchor() -> CGRect {
+    let vf = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? .zero
+    return CGRect(x: vf.midX, y: vf.minY + 56, width: 0, height: 0)
   }
 
   // MARK: - Menubar
@@ -74,7 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   @objc private func organizeNow() {
-    manager.tidyAll()
+    organizeAndAdjust()
   }
 
   // MARK: - Permissions
@@ -95,7 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     hotKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
       let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
       if mods == [.command, .option], event.charactersIgnoringModifiers?.lowercased() == "t" {
-        self?.manager.tidyAll()
+        self?.organizeAndAdjust()
       }
     }
 

@@ -1,21 +1,30 @@
 import AppKit
 import ApplicationServices
+import BoxedKit
 
 /// Watches for newly-opened windows and, when one appears, asks the delegate to
-/// offer placement suggestions. It does NOT move anything on its own — that's the
-/// whole point: boxed stays out of the normal macOS workflow until you opt in by
-/// clicking a suggestion. `tidyAll()` is the one exception, and only runs when the
-/// user explicitly invokes it.
+/// offer to organize. Organizing tiles every window on the active display; the
+/// resulting arrangement is an "organize session" the user can then tweak with
+/// rebox (cycle layout) and swap (rotate which window sits where).
+///
+/// It never moves anything on its own — only on a user's click or shortcut.
 final class WindowManager {
-  /// When true, a prompt appears near each newly-opened window. Default behavior.
   var suggestNewWindows = true
   var gap: CGFloat = 8
 
-  /// Called on the main thread when a new window appears and we should offer to
-  /// organize. `anchor` is the new window's frame in Cocoa (bottom-left) coords.
+  /// Called on the main thread when a new window appears. `anchor` is the new
+  /// window's frame in Cocoa (bottom-left) coordinates.
   var onNewWindow: ((_ anchor: CGRect) -> Void)?
 
   private var observers: [pid_t: AXObserver] = [:]
+
+  private struct Session {
+    var windows: [AXUIElement]
+    var screen: NSScreen
+    var layoutIndex: Int
+    var order: [Int]  // order[slot] = index into `windows`
+  }
+  private var session: Session?
 
   func start() {
     let nc = NSWorkspace.shared.notificationCenter
@@ -33,29 +42,72 @@ final class WindowManager {
     observeRunningApps()
   }
 
-  // MARK: - New-window suggestions
-
-  /// Invoked (on the main thread) shortly after a window is created, once it has
-  /// had a moment to settle into its initial size.
   func handleWindowCreated(_ window: AXUIElement) {
     guard suggestNewWindows, isTileable(window), let newFrame = frame(of: window) else { return }
     Log.write("new window -> offering organize")
     onNewWindow?(axToCocoa(newFrame))
   }
 
-  // MARK: - Manual tidy (user-initiated only)
+  // MARK: - Organize session
 
-  /// Tile every window on the active display into a BSP layout. Only called from
-  /// the menubar item / hotkey — never automatically.
-  func tidyAll() {
-    let screen = NSScreen.main ?? NSScreen.screens.first
-    guard let screen else { return }
-    let windows = tileableWindows().filter { frame(of: $0).map { screenContains(screen, $0) } ?? false }
-    guard !windows.isEmpty else { return }
-    let frames = Layout.bsp(count: windows.count, in: usableRect(on: screen), gap: gap)
-    for (window, rect) in zip(windows, frames) {
-      setFrame(window, rect)
+  /// Capture every window on the active display and tile them with the default
+  /// layout for that count. Returns the layout's name (nil if nothing to tile).
+  @discardableResult
+  func organize() -> String? {
+    guard let screen = NSScreen.main ?? NSScreen.screens.first else { return nil }
+    let windows = tileableWindows().filter {
+      frame(of: $0).map { screenContains(screen, $0) } ?? false
     }
+    guard !windows.isEmpty else {
+      Log.write("organize: no windows to tile")
+      return nil
+    }
+    session = Session(
+      windows: windows, screen: screen, layoutIndex: 0, order: Array(0..<windows.count))
+    applySession()
+    return currentLayoutName()
+  }
+
+  /// Cycle to the next layout for the current window count and re-apply.
+  @discardableResult
+  func rebox() -> String? {
+    guard var s = session else { return nil }
+    let kinds = Tiling.layouts(for: s.windows.count)
+    guard !kinds.isEmpty else { return nil }
+    s.layoutIndex = (s.layoutIndex + 1) % kinds.count
+    session = s
+    applySession()
+    return currentLayoutName()
+  }
+
+  /// Rotate which window occupies which slot and re-apply.
+  @discardableResult
+  func swap() -> String? {
+    guard var s = session, s.order.count > 1 else { return currentLayoutName() }
+    s.order = Array(s.order.dropFirst()) + [s.order[0]]
+    session = s
+    applySession()
+    return currentLayoutName()
+  }
+
+  func currentLayoutName() -> String? {
+    guard let s = session else { return nil }
+    let kinds = Tiling.layouts(for: s.windows.count)
+    guard !kinds.isEmpty else { return nil }
+    return Tiling.name(kinds[s.layoutIndex % kinds.count], count: s.windows.count)
+  }
+
+  private func applySession() {
+    guard let s = session else { return }
+    let count = s.windows.count
+    let kinds = Tiling.layouts(for: count)
+    guard !kinds.isEmpty else { return }
+    let kind = kinds[s.layoutIndex % kinds.count]
+    let rects = Tiling.slots(kind, count: count, in: usableRect(on: s.screen), gap: gap)
+    for slot in 0..<min(count, rects.count) {
+      setFrame(s.windows[s.order[slot]], rects[slot])
+    }
+    Log.write("applied \(Tiling.name(kind, count: count)) (count=\(count), order=\(s.order))")
   }
 
   // MARK: - Window discovery
@@ -126,10 +178,10 @@ final class WindowManager {
       NSScreen.screens.first(where: { $0.frame.origin == .zero })?.frame.height
       ?? screen.frame.height
     let v = screen.visibleFrame
-    return CGRect(x: v.minX, y: primaryHeight - (v.minY + v.height), width: v.width, height: v.height)
+    return CGRect(
+      x: v.minX, y: primaryHeight - (v.minY + v.height), width: v.width, height: v.height)
   }
 
-  /// Convert a top-left (Accessibility) rect to a bottom-left (Cocoa) rect.
   private func axToCocoa(_ rect: CGRect) -> CGRect {
     let primaryHeight =
       NSScreen.screens.first(where: { $0.frame.origin == .zero })?.frame.height
@@ -163,7 +215,6 @@ final class WindowManager {
       guard (notification as String) == (kAXWindowCreatedNotification as String) else { return }
       Log.write("AXWindowCreated received")
       let window = element
-      // Let the app finish sizing the window before we read its frame.
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
         manager.handleWindowCreated(window)
       }

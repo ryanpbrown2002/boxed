@@ -28,12 +28,14 @@ and the **⧉ Organize tabs** pill appears.
 ## How you use it
 
 - **Open a window** → the pill shows up nearby. Click it to tile everything.
+- **Then tweak it** → a little pill drifts in with **⇄ Swap** (move windows around)
+  and **▦ Rebox** (try the next layout). With two windows that's *Left / Right* vs
+  *Top / Bottom*; more windows get more options.
 - **⌥ (Option) + right-click anywhere** → summon the pill at your cursor.
-- **⌥⌘T** → organize instantly, no pill.
-- **Menubar `▣`** → *Organize tabs now*, or turn the pop-up pill off.
+- **⌥⌘T** → organize instantly. **Menubar `▣`** → organize, or turn the pill off.
 
 Layouts adapt to how many windows are open — 1 fills the screen, 2 split it, 3 go in
-thirds, 4 make a quad, and so on.
+thirds or main+stack, 4 make a quad, and 5+ tile automatically.
 
 ## Good to know
 

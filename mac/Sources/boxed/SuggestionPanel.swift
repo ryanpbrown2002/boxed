@@ -1,9 +1,18 @@
 import AppKit
 
 /// One offered action in the prompt: a label and what to do when clicked.
+/// `keepsPanelOpen` buttons (Swap/Rebox) leave the pill up so it can be re-shown
+/// with refreshed content instead of dismissing.
 struct WindowSuggestion {
   let label: String
+  let keepsPanelOpen: Bool
   let apply: () -> Void
+
+  init(label: String, keepsPanelOpen: Bool = false, apply: @escaping () -> Void) {
+    self.label = label
+    self.keepsPanelOpen = keepsPanelOpen
+    self.apply = apply
+  }
 }
 
 /// A small, transient, tooltip-style prompt that appears near a newly-opened
@@ -17,12 +26,12 @@ final class SuggestionPanel: NSObject {
   /// How long the prompt lingers before quietly fading away.
   var timeout: TimeInterval = 9
 
-  func present(_ suggestions: [WindowSuggestion], near anchor: CGRect) {
+  func present(title: String? = nil, _ suggestions: [WindowSuggestion], near anchor: CGRect) {
     dismiss(animated: false)
     guard !suggestions.isEmpty else { return }
     self.suggestions = suggestions
 
-    let content = buildContent(suggestions)
+    let content = buildContent(title: title, suggestions)
     content.layoutSubtreeIfNeeded()
     let size = content.fittingSize
 
@@ -92,7 +101,7 @@ final class SuggestionPanel: NSObject {
 
   // MARK: - View
 
-  private func buildContent(_ suggestions: [WindowSuggestion]) -> NSView {
+  private func buildContent(title: String?, _ suggestions: [WindowSuggestion]) -> NSView {
     let blur = NSVisualEffectView()
     blur.material = .hudWindow
     blur.state = .active
@@ -105,8 +114,15 @@ final class SuggestionPanel: NSObject {
     stack.orientation = .horizontal
     stack.spacing = 6
     stack.alignment = .centerY
-    stack.edgeInsets = NSEdgeInsets(top: 7, left: 8, bottom: 7, right: 8)
+    stack.edgeInsets = NSEdgeInsets(top: 7, left: title == nil ? 8 : 12, bottom: 7, right: 8)
     stack.translatesAutoresizingMaskIntoConstraints = false
+
+    if let title {
+      let label = NSTextField(labelWithString: title)
+      label.font = .systemFont(ofSize: 12, weight: .semibold)
+      label.textColor = .secondaryLabelColor
+      stack.addArrangedSubview(label)
+    }
 
     for (index, suggestion) in suggestions.enumerated() {
       let button = NSButton(
@@ -136,10 +152,12 @@ final class SuggestionPanel: NSObject {
 
   @objc private func suggestionClicked(_ sender: NSButton) {
     let index = sender.tag
-    if index >= 0, index < suggestions.count {
-      suggestions[index].apply()
-    }
-    dismiss()
+    guard index >= 0, index < suggestions.count else { return }
+    // Capture before apply() — apply may re-present and replace `suggestions`.
+    let keepOpen = suggestions[index].keepsPanelOpen
+    let action = suggestions[index].apply
+    if !keepOpen { dismiss() }
+    action()
   }
 
   @objc private func closeClicked() {

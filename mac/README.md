@@ -1,76 +1,74 @@
 # boxed (native macOS)
 
-A menubar helper that stays out of your way. It does **not** auto-arrange your
-windows. When you open a new window, a small tooltip-style pill appears near it
-with a single **⧉ Organize tabs** button. Click it to tile all your windows into a
-layout that adapts to how many are open (1 → full, 2 → split, 3 → thirds, 4 →
-quad…). Ignore it and it fades away, leaving everything where macOS put it.
+A menubar helper that stays out of your way. When you open a new window, a small
+pill appears with **⧉ Organize tabs**. Click it and every window on the display
+snaps into a layout. A second pill drifts in (bottom-center, fades on its own) to
+tweak the result:
+
+- **⇄ Swap** — rotate which window sits in which slot.
+- **▦ Rebox** — cycle to the next layout for that window count.
+
+Ignore the pills and nothing moves — your normal macOS workflow is untouched.
 Tier 1: needs only Accessibility permission, no SIP.
+
+## Layouts (by window count)
+
+| Windows | Layouts you cycle through (Rebox)            |
+| ------- | -------------------------------------------- |
+| 1       | Full                                         |
+| 2       | **Left / Right**, **Top / Bottom**           |
+| 3       | Columns, Rows, Main + stack, Main + row      |
+| 4       | Grid, Columns, Rows, Main + stack            |
+| 5+      | Auto (binary-space-partition fallback)       |
 
 ## One-time setup
 
 ```bash
 cd mac
-./scripts/setup-signing.sh   # create a stable local signing identity (run once)
+./scripts/setup-signing.sh   # stable signing → grant Accessibility just once
 ./scripts/make-app.sh        # build boxed.app (menubar agent, no dock icon)
 open boxed.app
 ```
 
-Grant **Accessibility** when prompted (or System Settings → Privacy & Security →
-Accessibility → toggle `boxed` on), then relaunch:
+Grant **Accessibility** when asked (System Settings → Privacy & Security →
+Accessibility), relaunch, and a `▣` appears in your menubar. Open a window to see
+the Organize pill.
+
+## Shortcuts & menubar
+
+- **⌥ (Option) + right-click anywhere** → Organize pill at your cursor.
+- **⌥⌘T** → organize immediately.
+- Menubar **`▣`** → *Organize tabs now*, or toggle the new-window pill off.
+
+## Tests
 
 ```bash
-killall boxed 2>/dev/null; open boxed.app
+./scripts/test.sh     # runs the XCTest suite (needs a full Xcode)
 ```
 
-`setup-signing.sh` matters: it signs boxed with a stable self-signed identity so
-the Accessibility grant **survives every rebuild**. Without it the app is ad-hoc
-signed and macOS forgets the grant each time you rebuild. (Undo any time with
-`security delete-keychain ~/Library/Keychains/boxed-dev.keychain-db`.)
-
-## What it does
-
-- **Suggests, never forces.** A transient, non-activating pill near each newly
-  opened window. It steals no focus and fades out after ~9s.
-- **One action: Organize.** Clicking **⧉ Organize tabs** BSP-tiles every window on
-  the active display. The layout is derived from the window count, so opening more
-  windows and re-organizing gives you a denser layout automatically.
-- **Summon on demand:**
-  - **⌥ (Option) + right-click anywhere** → pop the Organize pill at your cursor.
-    (Gated on Option so normal right-clicks / context menus are untouched.)
-  - **⌥⌘T** → organize immediately, no pill.
-  - Menubar **`▣` → Organize tabs now**.
-- **Menubar toggle:** *Offer to organize on new windows* (turn the pill on/off).
-
-> Normal macOS workflow is untouched — opening apps behaves exactly as before
-> unless you click Organize (or use a shortcut).
+The snapping geometry is pure and unit-tested in `BoxedKitTests` — layouts per
+count, Left/Right vs Top/Bottom, quad order, main+stack, gap insets, the
+"every layout tiles with no gaps/overlap" invariant, and the 5+ BSP fallback.
 
 ## Code map
 
-- [`WindowManager.swift`](Sources/boxed/WindowManager.swift) — discovers windows
-  (Accessibility API), watches for new ones (`AXObserver`), applies frames. Acts
-  only on your click; `tidyAll()` is the organize-everything pass.
-- [`Layout.swift`](Sources/boxed/Layout.swift) — pure BSP tiling math (verified
-  with a standalone `swiftc` check).
+- [`Sources/BoxedKit/Tiling.swift`](Sources/BoxedKit/Tiling.swift) — the layout
+  system: which layouts per count, their names, and slot geometry. **Pure, tested.**
+- [`Sources/BoxedKit/Layout.swift`](Sources/BoxedKit/Layout.swift) — BSP math for
+  the 5+ fallback. Pure, tested.
+- [`WindowManager.swift`](Sources/boxed/WindowManager.swift) — finds windows (AX
+  API), runs the organize session (organize / rebox / swap), applies frames.
 - [`SuggestionPanel.swift`](Sources/boxed/SuggestionPanel.swift) — the transient
-  pill (non-activating `NSPanel`, lingers then fades, screen-clamped).
+  pill (non-activating, lingers then fades; supports a title + keep-open buttons).
 - [`AppDelegate.swift`](Sources/boxed/AppDelegate.swift) — menubar, permission
-  prompt, shortcuts, ⌥ right-click summon.
-- [`Log.swift`](Sources/boxed/Log.swift) — file logger at `/tmp/boxed.log` (handy
-  for debugging an `open`-launched build whose stderr goes nowhere).
-
-## Dev
-
-```bash
-swift build        # debug build (no signing/bundle)
-tail -f /tmp/boxed.log   # watch what the running app is doing
-```
+  prompt, shortcuts, the two-stage Organize → Swap/Rebox flow.
+- [`Log.swift`](Sources/boxed/Log.swift) — file logger at `/tmp/boxed.log`.
 
 ## Known limitations / things to play with
 
 - Active display only; cross-Space moves are Phase 2 (SIP).
-- BSP order follows window-enumeration order; no manual reorder/swap yet.
-- No persisted layouts, no per-app float rules, no "managed set reflows when a
-  window closes" yet — natural follow-ups.
-- `swift test`/XCTest needs full Xcode (CLT only here); pure logic is verified via
-  standalone `swiftc` checks.
+- Organize captures the windows present at click time; if one closes mid-session,
+  applying to it simply no-ops (a "reflow when a window closes" mode is a natural
+  next step).
+- 5+ windows use a generic BSP layout — hand-tuned layouts for higher counts are
+  the obvious "we'll get there" follow-up.
