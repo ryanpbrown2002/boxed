@@ -262,15 +262,40 @@ final class WindowManager {
     return CGRect(origin: point, size: size)
   }
 
+  /// Place a window in its slot. Windows that allow resizing fill the slot;
+  /// fixed/size-capped windows (media players, fixed dialogs) keep their natural
+  /// size and just anchor to the slot's top-left, so the leftover space falls to
+  /// the bottom-right instead of leaving a stretched window.
   private func setFrame(_ window: AXUIElement, _ rect: CGRect) {
-    var origin = rect.origin
-    var size = rect.size
-    if let posValue = AXValueCreate(.cgPoint, &origin) {
-      AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, posValue)
+    setPosition(window, rect.origin)
+    guard isSizeSettable(window) else {
+      Log.write("fixed-size window kept natural size, anchored top-left")
+      return
     }
-    if let sizeValue = AXValueCreate(.cgSize, &size) {
-      AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sizeValue)
+    setSize(window, rect.size)
+    // Some apps recenter when resized; re-anchor so any capped leftover is
+    // bottom-right, not centered.
+    setPosition(window, rect.origin)
+  }
+
+  private func setPosition(_ window: AXUIElement, _ origin: CGPoint) {
+    var o = origin
+    if let value = AXValueCreate(.cgPoint, &o) {
+      AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, value)
     }
+  }
+
+  private func setSize(_ window: AXUIElement, _ size: CGSize) {
+    var s = size
+    if let value = AXValueCreate(.cgSize, &s) {
+      AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, value)
+    }
+  }
+
+  private func isSizeSettable(_ window: AXUIElement) -> Bool {
+    var settable: DarwinBoolean = false
+    let err = AXUIElementIsAttributeSettable(window, kAXSizeAttribute as CFString, &settable)
+    return err == .success && settable.boolValue
   }
 
   /// Usable area of a display, in the Accessibility API's top-left coordinate space.
