@@ -10,12 +10,7 @@ import CoreGraphics
 ///
 /// It never moves anything on its own — only on a user's click or shortcut.
 final class WindowManager {
-  var suggestNewWindows = true
   var gap: CGFloat = 8
-
-  /// Called on the main thread when a new window appears. `anchor` is the new
-  /// window's frame in Cocoa (bottom-left) coordinates.
-  var onNewWindow: ((_ anchor: CGRect) -> Void)?
 
   /// True while the adjust pill is showing ("edit mode"). When set, opening or
   /// closing a window automatically re-tiles instead of offering a fresh prompt.
@@ -92,24 +87,13 @@ final class WindowManager {
       AXUIElementPerformAction(window, kAXRaiseAction as CFString)
       Log.write("raised new window to front")
     }
-    // In edit mode, a new window should just slot into the current layout —
-    // unless the user is mid-drag, in which case don't yank things around.
-    if editMode {
-      if !draggingSplitter {
-        Log.write("new window during edit mode -> reflow")
-        scheduleReflow()
-      }
-      return
+    // In edit mode, a new window slots into the current layout — unless the user
+    // is mid-drag, in which case don't yank things around. (boxed never prompts on
+    // its own; organizing is always summoned by the user.)
+    if editMode, !draggingSplitter {
+      Log.write("new window during edit mode -> reflow")
+      scheduleReflow()
     }
-    guard suggestNewWindows, isTileable(window), let newFrame = frame(of: window) else { return }
-    // Only offer to organize when there's already another window to tile with —
-    // the first window on an empty Space has nothing to arrange against.
-    guard tileableCount() >= 2 else {
-      Log.write("first window on screen — no organize pill")
-      return
-    }
-    Log.write("new window -> offering organize")
-    onNewWindow?(axToCocoa(newFrame))
   }
 
   /// A window (or other UI element) was destroyed. Drop any closed window from its

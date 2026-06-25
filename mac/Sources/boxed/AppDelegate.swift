@@ -3,7 +3,6 @@ import ApplicationServices
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private var statusItem: NSStatusItem!
-  private var suggestItem: NSMenuItem!
   private var organizeItem: NSMenuItem!
   private var hotKeyMonitor: Any?
   private var rightClickMonitor: Any?
@@ -34,9 +33,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     setupMenu()
     requestAccessibility()
 
-    manager.onNewWindow = { [weak self] anchor in
-      self?.showOrganizePill(near: anchor)
-    }
     // Drag-to-swap, the splitter, and auto-reflow are only live while editing.
     suggestionPanel.onDismiss = { [weak self] in
       self?.manager.editMode = false
@@ -214,15 +210,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     organizeItem.target = self
     menu.addItem(organizeItem)
 
-    menu.addItem(.separator())
-
-    suggestItem = NSMenuItem(
-      title: "Offer to organize on new windows", action: #selector(toggleSuggest), keyEquivalent: "")
-    suggestItem.target = self
-    suggestItem.state = manager.suggestNewWindows ? .on : .off
-    menu.addItem(suggestItem)
-
-    let hint = NSMenuItem(title: "Tip: ⌥ right-click anywhere to summon", action: nil, keyEquivalent: "")
+    let hint = NSMenuItem(
+      title: "Tip: ⌥ right-click anywhere to summon", action: nil, keyEquivalent: "")
     hint.isEnabled = false
     menu.addItem(hint)
 
@@ -243,11 +232,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     organizeItem.isEnabled = canOrganize
     organizeItem.title =
       (canOrganize && manager.isAlreadyOrganized()) ? "Edit tabs" : "Organize tabs now"
-  }
-
-  @objc private func toggleSuggest() {
-    manager.suggestNewWindows.toggle()
-    suggestItem.state = manager.suggestNewWindows ? .on : .off
   }
 
   @objc private func organizeNow() {
