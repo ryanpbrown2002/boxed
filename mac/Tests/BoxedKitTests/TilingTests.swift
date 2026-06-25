@@ -27,9 +27,13 @@ final class TilingTests: XCTestCase {
     let right = CGRect(x: 1710, y: 516, width: 1920, height: 1080)
     // Fully inside the right display.
     XCTAssertEqual(Tiling.maxOverlapIndex(of: CGRect(x: 2000, y: 600, width: 400, height: 300), among: [left, right]), 1)
-    // A tall window whose center hangs just past the right display's bottom edge —
-    // the center test would miss it, but it still overlaps the right display most.
-    XCTAssertEqual(Tiling.maxOverlapIndex(of: CGRect(x: 2000, y: 500, width: 800, height: 1200), among: [left, right]), 1)
+    // Regression guard for unifying display membership on overlap (not center):
+    // this window's CENTER (2400,1700) lies past the right display's bottom edge
+    // (y 516..1596), so the old center-point test mapped it to NO display and
+    // dropped it. It still overlaps only the right display, so it belongs to it.
+    let centerOffDisplay = CGRect(x: 2000, y: 1500, width: 800, height: 400)
+    XCTAssertFalse(right.contains(CGPoint(x: centerOffDisplay.midX, y: centerOffDisplay.midY)))
+    XCTAssertEqual(Tiling.maxOverlapIndex(of: centerOffDisplay, among: [left, right]), 1)
     // Straddling: more area on the left → left wins.
     XCTAssertEqual(Tiling.maxOverlapIndex(of: CGRect(x: 1500, y: 600, width: 400, height: 300), among: [left, right]), 0)
     // Off both displays entirely → nil.

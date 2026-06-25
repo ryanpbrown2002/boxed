@@ -136,8 +136,7 @@ final class WindowManager {
     let alive = old.windows.filter { isTileable($0) && frame(of: $0) != nil }
     // Add genuinely new on-screen windows we aren't tracking yet.
     let newcomers = tileableWindows().filter { candidate in
-      (frame(of: candidate).map { screenContains(screen, $0) } ?? false)
-        && !alive.contains { CFEqual($0, candidate) }
+      isOn(candidate, screen) && !alive.contains { CFEqual($0, candidate) }
     }
     // Keep existing windows in their order; new ones go to the trailing slots.
     let windows = alive + newcomers
@@ -162,7 +161,7 @@ final class WindowManager {
     guard let screen = screenUnderCursor() else { return nil }
     activeDisplay = displayID(screen)
     let onScreen = tileableWindows().filter {
-      frame(of: $0).map { screenContains(screen, $0) } ?? false
+      isOn($0, screen)
     }
     guard !onScreen.isEmpty else {
       Log.write("organize: no windows to tile")
@@ -189,7 +188,7 @@ final class WindowManager {
     }
     activeDisplay = displayID(screen)
     let onScreen = tileableWindows().filter {
-      frame(of: $0).map { screenContains(screen, $0) } ?? false
+      isOn($0, screen)
     }
     // Nothing to arrange with a single window — don't tile it to "Full".
     guard onScreen.count >= 2 else {
@@ -213,7 +212,7 @@ final class WindowManager {
   /// How many tileable windows are on the display under the cursor right now.
   func tileableCount() -> Int {
     guard let screen = screenUnderCursor() else { return 0 }
-    return tileableWindows().filter { frame(of: $0).map { screenContains(screen, $0) } ?? false }
+    return tileableWindows().filter { isOn($0, screen) }
       .count
   }
 
@@ -222,7 +221,7 @@ final class WindowManager {
   func isAlreadyOrganized() -> Bool {
     guard let screen = screenUnderCursor(), let s = sessions[displayID(screen)] else { return false }
     let onScreen = tileableWindows().filter {
-      frame(of: $0).map { screenContains(screen, $0) } ?? false
+      isOn($0, screen)
     }
     return !onScreen.isEmpty && sameWindowSet(s.windows, onScreen)
   }
@@ -343,7 +342,7 @@ final class WindowManager {
 
     // If any window left this display, let reconcileDisplays handle it (move to
     // another boxed display or release) — don't swap-snap it back here.
-    if s.windows.contains(where: { !(frame(of: $0).map { screenContains(s.screen, $0) } ?? false) }) {
+    if s.windows.contains(where: { !isOn($0, s.screen) }) {
       ratioDirty = false
       return nil
     }
@@ -997,11 +996,6 @@ final class WindowManager {
       height: rect.height)
   }
 
-  private func screenContains(_ screen: NSScreen, _ axRect: CGRect) -> Bool {
-    let cocoa = axToCocoa(axRect)
-    return screen.frame.contains(CGPoint(x: cocoa.midX, y: cocoa.midY))
-  }
-
   // MARK: - Displays
 
   func displayID(_ screen: NSScreen) -> CGDirectDisplayID {
@@ -1020,6 +1014,16 @@ final class WindowManager {
   }
 
   /// Which display a window currently sits on (by its center), if any.
+  /// Whether a window belongs to `screen` — i.e. it's the display the window
+  /// overlaps most (see `currentScreen`). The single source of truth for "is this
+  /// window on this display", so organize, edit, reconcile and fullscreen all
+  /// agree; a window taller/wider than where it sits still counts on the display
+  /// it mostly covers, rather than falling through a strict center-point test.
+  private func isOn(_ window: AXUIElement, _ screen: NSScreen) -> Bool {
+    guard let s = currentScreen(of: window) else { return false }
+    return displayID(s) == displayID(screen)
+  }
+
   private func currentScreen(of window: AXUIElement) -> NSScreen? {
     guard let f = frame(of: window) else { return nil }
     // Use the display the window overlaps most, not a strict center-point test: a
@@ -1049,7 +1053,7 @@ final class WindowManager {
   /// A native-fullscreen window on the given display, if any.
   private func fullscreenWindow(on screen: NSScreen) -> AXUIElement? {
     tileableWindows().first { w in
-      (frame(of: w).map { screenContains(screen, $0) } ?? false) && isFullscreen(w)
+      isOn(w, screen) && isFullscreen(w)
     }
   }
 
