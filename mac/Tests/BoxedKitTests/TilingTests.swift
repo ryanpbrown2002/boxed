@@ -8,6 +8,22 @@ final class TilingTests: XCTestCase {
 
   // MARK: "compact" (don't-stretch) detection
 
+  func testClampOnscreen() {
+    let b = CGRect(x: 0, y: 0, width: 1000, height: 800)
+    // Fully inside → unchanged.
+    XCTAssertEqual(
+      Tiling.clampOnscreen(CGRect(x: 100, y: 100, width: 200, height: 200), within: b),
+      CGRect(x: 100, y: 100, width: 200, height: 200))
+    // Spills past right/bottom → pulled back in (same size).
+    XCTAssertEqual(
+      Tiling.clampOnscreen(CGRect(x: 900, y: 700, width: 300, height: 300), within: b),
+      CGRect(x: 700, y: 500, width: 300, height: 300))
+    // Bigger than the bounds → top-left aligned (title bar stays reachable).
+    XCTAssertEqual(
+      Tiling.clampOnscreen(CGRect(x: 50, y: 50, width: 1200, height: 900), within: b),
+      CGRect(x: 0, y: 0, width: 1200, height: 900))
+  }
+
   func testShrinkVertically() {
     let r = CGRect(x: 10, y: 20, width: 200, height: 400)
     XCTAssertEqual(Tiling.shrinkVertically(r, top: 0, bottom: 0), r)  // no change

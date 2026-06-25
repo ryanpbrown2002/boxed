@@ -607,13 +607,14 @@ final class WindowManager {
     let kinds = Tiling.layouts(for: count)
     guard !kinds.isEmpty else { return }
     let kind = kinds[s.layoutIndex % kinds.count]
-    let eff = effectiveRect(usableRect(on: s.screen), s)
+    let usable = usableRect(on: s.screen)
+    let eff = effectiveRect(usable, s)
     let rects = Tiling.slots(
       kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio)
     for slot in 0..<min(count, rects.count) {
       let vi = slot < s.vInsets.count ? s.vInsets[slot] : (top: CGFloat(0), bottom: CGFloat(0))
       let r = Tiling.shrinkVertically(rects[slot], top: vi.top, bottom: vi.bottom)
-      place(s.windows[s.order[slot]], in: r)
+      place(s.windows[s.order[slot]], in: r, within: usable)
     }
     Log.write("applied \(Tiling.name(kind, count: count)) (count=\(count)) on display \(displayID(s.screen))")
   }
@@ -814,12 +815,20 @@ final class WindowManager {
   /// Place a window in its slot. Resizable windows fill the slot; a non-resizable
   /// window keeps its size, anchored top-right (it can't be stretched). The
   /// fill/keep decision is the pure, tested `Tiling.placement`.
-  private func place(_ window: AXUIElement, in slot: CGRect) {
+  private func place(_ window: AXUIElement, in slot: CGRect, within bounds: CGRect) {
     let resizable = isSizeSettable(window)
     let target = Tiling.placement(slot: slot, natural: naturalSize(of: window), resizable: resizable)
     setPosition(window, target.origin)
     if resizable { setSize(window, target.size) }
     setPosition(window, target.origin)  // re-anchor for apps that recenter on resize
+    // If the window has a minimum size larger than its slot, it stayed big and may
+    // now spill off the display — nudge it back on-screen.
+    if let actual = frame(of: window) {
+      let fitted = Tiling.clampOnscreen(actual, within: bounds)
+      if abs(fitted.minX - actual.minX) > 0.5 || abs(fitted.minY - actual.minY) > 0.5 {
+        setPosition(window, fitted.origin)
+      }
+    }
   }
 
   // MARK: - Natural sizes

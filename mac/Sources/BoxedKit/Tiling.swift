@@ -41,6 +41,18 @@ public enum Tiling {
     }
   }
 
+  /// Nudge a frame so it lies fully within `bounds`, without resizing it. Used
+  /// when a window has a minimum size larger than its slot: rather than spill off
+  /// the display, it's pulled back on-screen (top-left aligned if it's simply
+  /// bigger than the bounds, so its title bar stays reachable).
+  public static func clampOnscreen(_ frame: CGRect, within bounds: CGRect) -> CGRect {
+    var x = min(frame.minX, bounds.maxX - frame.width)
+    x = max(x, bounds.minX)
+    var y = min(frame.minY, bounds.maxY - frame.height)
+    y = max(y, bounds.minY)
+    return CGRect(x: x, y: y, width: frame.width, height: frame.height)
+  }
+
   /// Shrink a slot from its top and/or bottom (for per-window height handles),
   /// clamped so it never collapses below `minHeight`. Width/x are untouched.
   public static func shrinkVertically(
