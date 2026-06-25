@@ -38,6 +38,20 @@ the user's tabs into a customizable, resizable grid. The guiding feeling is
 
 ## Definition of done (run before every commit)
 
+> **ALWAYS re-run the full test suite after ANY change — no exceptions.** A change
+> that "obviously can't break anything" still must be verified green before it's
+> done or committed. For the native app that means:
+> ```bash
+> cd mac && swift build && ./scripts/test.sh
+> ```
+> Tests passing is necessary but not sufficient: the suite only covers the pure
+> `BoxedKit` logic. If you touched window/AX behavior, ALSO re-verify the real
+> behavior via the `/tmp/boxed-cmd` hook + `CGWindowList` inspection (rebuild with
+> `./scripts/make-app.sh` first) — and when a regression slips through, add a test
+> that would have caught it.
+
+For the parked Electron app:
+
 ```bash
 pnpm typecheck && pnpm lint && pnpm test
 ```
