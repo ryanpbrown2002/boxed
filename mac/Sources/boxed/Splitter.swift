@@ -10,7 +10,7 @@ final class SplitterView: NSView {
   private var hovered = false
   private var trackingArea: NSTrackingArea?
 
-  private static let accent = NSColor(srgbRed: 0.78, green: 1.0, blue: 0.23, alpha: 1)
+  private static let accent = NSColor(srgbRed: 0.55, green: 0.8, blue: 1.0, alpha: 1)  // light blue
 
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
   override func mouseDown(with event: NSEvent) { onDown?() }
@@ -41,11 +41,13 @@ final class SplitterView: NSView {
       return NSBezierPath(roundedRect: r, xRadius: thickness / 2, yRadius: thickness / 2)
     }
 
-    NSColor(white: 0, alpha: hovered ? 0.4 : 0.22).setFill()
-    capsule(thickness: 7, length: hovered ? 52 : 44).fill()
+    // Faint base just for legibility on any window; grows a touch on hover.
+    NSColor(white: 0, alpha: hovered ? 0.16 : 0.07).setFill()
+    capsule(thickness: 6, length: hovered ? 40 : 28).fill()
 
-    (hovered ? Self.accent : NSColor(white: 1, alpha: 0.75)).setFill()
-    capsule(thickness: 3, length: hovered ? 30 : 24).fill()
+    // Subtle light-blue grip; quietly there at rest, clearer on hover.
+    Self.accent.withAlphaComponent(hovered ? 0.9 : 0.38).setFill()
+    capsule(thickness: 3, length: hovered ? 26 : 18).fill()
   }
 }
 

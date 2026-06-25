@@ -492,23 +492,29 @@ final class WindowManager {
         frame: axToCocoa(CGRect(x: eff.maxX - grab / 2, y: eff.minY, width: grab, height: eff.height)),
         vertical: true))
 
-    // Per-window height handles: a bar on each window's top and bottom edge, so a
-    // single window's height can be adjusted on its own (a desktop gap opens).
+    // Per-window height handles — only on a window's FREE outer edges (those at
+    // the layout's top/bottom). An inner edge shared with a neighbor is owned by
+    // the split divider, so we don't stack a handle there (that was moving both).
     let raw = Tiling.slots(
       kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio)
+    let tol: CGFloat = 1.5
     for slot in 0..<min(count, raw.count) {
       let vi = slot < s.vInsets.count ? s.vInsets[slot] : (top: CGFloat(0), bottom: CGFloat(0))
       let f = Tiling.shrinkVertically(raw[slot], top: vi.top, bottom: vi.bottom)
-      out.append(
-        Divider(
-          kind: .windowTop(slot),
-          frame: axToCocoa(CGRect(x: f.minX, y: f.minY - grab / 2, width: f.width, height: grab)),
-          vertical: false))
-      out.append(
-        Divider(
-          kind: .windowBottom(slot),
-          frame: axToCocoa(CGRect(x: f.minX, y: f.maxY - grab / 2, width: f.width, height: grab)),
-          vertical: false))
+      if abs(raw[slot].minY - eff.minY) < tol {
+        out.append(
+          Divider(
+            kind: .windowTop(slot),
+            frame: axToCocoa(CGRect(x: f.minX, y: f.minY - grab / 2, width: f.width, height: grab)),
+            vertical: false))
+      }
+      if abs(raw[slot].maxY - eff.maxY) < tol {
+        out.append(
+          Divider(
+            kind: .windowBottom(slot),
+            frame: axToCocoa(CGRect(x: f.minX, y: f.maxY - grab / 2, width: f.width, height: grab)),
+            vertical: false))
+      }
     }
     return out
   }
