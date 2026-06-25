@@ -285,6 +285,12 @@ final class WindowManager {
     applySession()
   }
 
+  /// Debug/test hook: log the current draggable handles.
+  func logDividers() {
+    let ds = dividers()
+    Log.write("dividers (\(ds.count)): " + ds.map { "\($0.kind)" }.joined(separator: ", "))
+  }
+
   /// Debug/test hook: set a slot's per-window height trim directly.
   func setVInset(_ slot: Int, top: CGFloat, bottom: CGFloat) {
     guard var s = session, slot >= 0, slot < s.windows.count else { return }
@@ -497,18 +503,18 @@ final class WindowManager {
     // the split divider, so we don't stack a handle there (that was moving both).
     let raw = Tiling.slots(
       kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio)
-    let tol: CGFloat = 1.5
     for slot in 0..<min(count, raw.count) {
       let vi = slot < s.vInsets.count ? s.vInsets[slot] : (top: CGFloat(0), bottom: CGFloat(0))
       let f = Tiling.shrinkVertically(raw[slot], top: vi.top, bottom: vi.bottom)
-      if abs(raw[slot].minY - eff.minY) < tol {
+      let edges = Tiling.touchesEdge(slot: raw[slot], layout: eff, gap: gap)
+      if edges.top {
         out.append(
           Divider(
             kind: .windowTop(slot),
             frame: axToCocoa(CGRect(x: f.minX, y: f.minY - grab / 2, width: f.width, height: grab)),
             vertical: false))
       }
-      if abs(raw[slot].maxY - eff.maxY) < tol {
+      if edges.bottom {
         out.append(
           Divider(
             kind: .windowBottom(slot),
@@ -822,8 +828,9 @@ final class WindowManager {
     if resizable { setSize(window, target.size) }
     setPosition(window, target.origin)  // re-anchor for apps that recenter on resize
     // If the window has a minimum size larger than its slot, it stayed big and may
-    // now spill off the display — nudge it back on-screen.
-    if let actual = frame(of: window) {
+    // now spill off the display — nudge it back on-screen. Skip mid-drag so a
+    // resize against a fixed window doesn't jitter.
+    if !draggingSplitter, let actual = frame(of: window) {
       let fitted = Tiling.clampOnscreen(actual, within: bounds)
       if abs(fitted.minX - actual.minX) > 0.5 || abs(fitted.minY - actual.minY) > 0.5 {
         setPosition(window, fitted.origin)

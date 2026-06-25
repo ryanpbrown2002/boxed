@@ -41,6 +41,16 @@ public enum Tiling {
     }
   }
 
+  /// Whether a slot's top/bottom edge sits at the layout's outer top/bottom (i.e.
+  /// is a "free" edge, not shared with a neighbor). Accounts for the per-slot gap
+  /// inset, so the tolerance must be at least the gap.
+  public static func touchesEdge(slot: CGRect, layout: CGRect, gap: CGFloat) -> (
+    top: Bool, bottom: Bool
+  ) {
+    let tol = gap + 2
+    return (top: slot.minY - layout.minY < tol, bottom: layout.maxY - slot.maxY < tol)
+  }
+
   /// Nudge a frame so it lies fully within `bounds`, without resizing it. Used
   /// when a window has a minimum size larger than its slot: rather than spill off
   /// the display, it's pulled back on-screen (top-left aligned if it's simply

@@ -183,6 +183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       case "swap": if let name = self.manager.swap() { self.showAdjustPill(layoutName: name) }
       case "drop": if let name = self.manager.handleWindowDropped() { self.showAdjustPill(layoutName: name) }
       case "reconcile": self.manager.reconcileDisplays()
+      case "dividers": self.manager.logDividers()
       case "dismiss": self.suggestionPanel.dismiss()
       default:
         if cmd.hasPrefix("ratio "), let v = Double(cmd.dropFirst(6)) {

@@ -8,6 +8,20 @@ final class TilingTests: XCTestCase {
 
   // MARK: "compact" (don't-stretch) detection
 
+  func testTouchesEdge() {
+    let layout = CGRect(x: 0, y: 0, width: 1000, height: 600)
+    // Regression guard: gap-inset slots still read as touching the outer edge.
+    let rows = Tiling.slots(.rows, count: 2, in: layout, gap: 8)  // top / bottom
+    XCTAssertEqual(Tiling.touchesEdge(slot: rows[0], layout: layout, gap: 8).top, true)
+    XCTAssertEqual(Tiling.touchesEdge(slot: rows[0], layout: layout, gap: 8).bottom, false)
+    XCTAssertEqual(Tiling.touchesEdge(slot: rows[1], layout: layout, gap: 8).bottom, true)
+    XCTAssertEqual(Tiling.touchesEdge(slot: rows[1], layout: layout, gap: 8).top, false)
+    // A full-height column touches both.
+    let col = Tiling.slots(.columns, count: 2, in: layout, gap: 8)[0]
+    let both = Tiling.touchesEdge(slot: col, layout: layout, gap: 8)
+    XCTAssertTrue(both.top && both.bottom)
+  }
+
   func testClampOnscreen() {
     let b = CGRect(x: 0, y: 0, width: 1000, height: 800)
     // Fully inside → unchanged.
