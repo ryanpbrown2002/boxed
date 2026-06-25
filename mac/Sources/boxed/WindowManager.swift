@@ -42,6 +42,9 @@ final class WindowManager {
     var insetBottom: CGFloat = 0
     var insetLeft: CGFloat = 0
     var insetRight: CGFloat = 0
+    // Per-slot height trim (points off the top/bottom of each window's slot), so a
+    // single window's height can be adjusted independently. Index = slot.
+    var vInsets: [(top: CGFloat, bottom: CGFloat)] = []
   }
   /// One layout per display ("boxed" displays). Keyed by display ID.
   private var sessions: [CGDirectDisplayID: Session] = [:]
@@ -282,6 +285,15 @@ final class WindowManager {
     applySession()
   }
 
+  /// Debug/test hook: set a slot's per-window height trim directly.
+  func setVInset(_ slot: Int, top: CGFloat, bottom: CGFloat) {
+    guard var s = session, slot >= 0, slot < s.windows.count else { return }
+    ensureVInsets(&s, s.windows.count)
+    s.vInsets[slot] = (top: max(0, top), bottom: max(0, bottom))
+    session = s
+    applySession()
+  }
+
   /// Debug/test hook: set the split ratios directly.
   func setRatios(primary: CGFloat?, stack: CGFloat?) {
     guard var s = session else { return }
@@ -298,6 +310,7 @@ final class WindowManager {
     let kinds = Tiling.layouts(for: s.windows.count)
     guard !kinds.isEmpty else { return nil }
     s.layoutIndex = (s.layoutIndex + 1) % kinds.count
+    s.vInsets = []  // slot meanings change with the layout — reset per-window heights
     session = s
     applySession()
     return currentLayoutName()
@@ -408,7 +421,10 @@ final class WindowManager {
 
   /// A draggable divider in the current layout.
   struct Divider {
-    enum Kind { case primary, stack, edgeTop, edgeBottom, edgeLeft, edgeRight }
+    enum Kind {
+      case primary, stack, edgeLeft, edgeRight
+      case windowTop(Int), windowBottom(Int)  // per-window height handles (slot index)
+    }
     let kind: Kind
     let frame: CGRect  // Cocoa (bottom-left) coords for the handle
     let vertical: Bool  // true → drags left/right; false → up/down
@@ -463,7 +479,8 @@ final class WindowManager {
       }
     }
 
-    // Outer edges — drag inward to inset the whole region (reveal desktop).
+    // Outer left/right margins (the layout's horizontal insets). Top/bottom are
+    // handled per-window below.
     out.append(
       Divider(
         kind: .edgeLeft,
@@ -474,16 +491,25 @@ final class WindowManager {
         kind: .edgeRight,
         frame: axToCocoa(CGRect(x: eff.maxX - grab / 2, y: eff.minY, width: grab, height: eff.height)),
         vertical: true))
-    out.append(
-      Divider(
-        kind: .edgeTop,
-        frame: axToCocoa(CGRect(x: eff.minX, y: eff.minY - grab / 2, width: eff.width, height: grab)),
-        vertical: false))
-    out.append(
-      Divider(
-        kind: .edgeBottom,
-        frame: axToCocoa(CGRect(x: eff.minX, y: eff.maxY - grab / 2, width: eff.width, height: grab)),
-        vertical: false))
+
+    // Per-window height handles: a bar on each window's top and bottom edge, so a
+    // single window's height can be adjusted on its own (a desktop gap opens).
+    let raw = Tiling.slots(
+      kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio)
+    for slot in 0..<min(count, raw.count) {
+      let vi = slot < s.vInsets.count ? s.vInsets[slot] : (top: CGFloat(0), bottom: CGFloat(0))
+      let f = Tiling.shrinkVertically(raw[slot], top: vi.top, bottom: vi.bottom)
+      out.append(
+        Divider(
+          kind: .windowTop(slot),
+          frame: axToCocoa(CGRect(x: f.minX, y: f.minY - grab / 2, width: f.width, height: grab)),
+          vertical: false))
+      out.append(
+        Divider(
+          kind: .windowBottom(slot),
+          frame: axToCocoa(CGRect(x: f.minX, y: f.maxY - grab / 2, width: f.width, height: grab)),
+          vertical: false))
+    }
     return out
   }
 
@@ -491,6 +517,10 @@ final class WindowManager {
   func setRatio(forDividerAt index: Int, fromScreenPoint point: CGPoint) {
     let ds = dividers()
     guard index < ds.count, var s = session else { return }
+    let count = s.windows.count
+    let kinds = Tiling.layouts(for: count)
+    guard !kinds.isEmpty else { return }
+    let kind = kinds[s.layoutIndex % kinds.count]
     let usable = usableRect(on: s.screen)
     let eff = effectiveRect(usable, s)
     let axY = primaryHeight() - point.y  // Cocoa → AX (top-left) y
@@ -504,12 +534,33 @@ final class WindowManager {
         ds[index].vertical ? (point.x - eff.minX) / eff.width : (axY - eff.minY) / eff.height)
     case .edgeLeft: s.insetLeft = clampInset(point.x - usable.minX, usable.width)
     case .edgeRight: s.insetRight = clampInset(usable.maxX - point.x, usable.width)
-    case .edgeTop: s.insetTop = clampInset(axY - usable.minY, usable.height)
-    case .edgeBottom: s.insetBottom = clampInset(usable.maxY - axY, usable.height)
+    case .windowTop(let slot):
+      let raw = Tiling.slots(
+        kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio)
+      if slot < raw.count {
+        ensureVInsets(&s, count)
+        let top = max(0, axY - raw[slot].minY)
+        s.vInsets[slot].top = min(top, max(0, raw[slot].height - 80 - s.vInsets[slot].bottom))
+      }
+    case .windowBottom(let slot):
+      let raw = Tiling.slots(
+        kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio)
+      if slot < raw.count {
+        ensureVInsets(&s, count)
+        let bottom = max(0, raw[slot].maxY - axY)
+        s.vInsets[slot].bottom = min(bottom, max(0, raw[slot].height - 80 - s.vInsets[slot].top))
+      }
     }
     session = s
     ratioDirty = true
     applySession()
+  }
+
+  private func ensureVInsets(_ s: inout Session, _ count: Int) {
+    if s.vInsets.count < count {
+      s.vInsets.append(
+        contentsOf: Array(repeating: (top: CGFloat(0), bottom: CGFloat(0)), count: count - s.vInsets.count))
+    }
   }
 
   private func primarySplitVertical(_ kind: LayoutKind, _ count: Int) -> Bool? {
@@ -554,7 +605,9 @@ final class WindowManager {
     let rects = Tiling.slots(
       kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio)
     for slot in 0..<min(count, rects.count) {
-      place(s.windows[s.order[slot]], in: rects[slot])
+      let vi = slot < s.vInsets.count ? s.vInsets[slot] : (top: CGFloat(0), bottom: CGFloat(0))
+      let r = Tiling.shrinkVertically(rects[slot], top: vi.top, bottom: vi.bottom)
+      place(s.windows[s.order[slot]], in: r)
     }
     Log.write("applied \(Tiling.name(kind, count: count)) (count=\(count)) on display \(displayID(s.screen))")
   }

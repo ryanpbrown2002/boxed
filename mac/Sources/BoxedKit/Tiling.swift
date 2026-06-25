@@ -41,6 +41,17 @@ public enum Tiling {
     }
   }
 
+  /// Shrink a slot from its top and/or bottom (for per-window height handles),
+  /// clamped so it never collapses below `minHeight`. Width/x are untouched.
+  public static func shrinkVertically(
+    _ rect: CGRect, top: CGFloat, bottom: CGFloat, minHeight: CGFloat = 80
+  ) -> CGRect {
+    let t = max(0, top)
+    let b = max(0, bottom)
+    let h = max(minHeight, rect.height - t - b)
+    return CGRect(x: rect.minX, y: rect.minY + t, width: rect.width, height: h)
+  }
+
   /// A window keeps its natural size (rather than filling) when its natural area
   /// is below this fraction of the slot's area. Tuned so a small window in a big
   /// half-slot stays small, but most windows fill a small quarter-slot.

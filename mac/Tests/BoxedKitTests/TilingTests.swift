@@ -8,6 +8,18 @@ final class TilingTests: XCTestCase {
 
   // MARK: "compact" (don't-stretch) detection
 
+  func testShrinkVertically() {
+    let r = CGRect(x: 10, y: 20, width: 200, height: 400)
+    XCTAssertEqual(Tiling.shrinkVertically(r, top: 0, bottom: 0), r)  // no change
+    XCTAssertEqual(
+      Tiling.shrinkVertically(r, top: 50, bottom: 30),
+      CGRect(x: 10, y: 70, width: 200, height: 320))  // top down 50, height -80
+    XCTAssertEqual(
+      Tiling.shrinkVertically(r, top: 500, bottom: 0, minHeight: 80).height, 80, accuracy: 0.001)
+    // x/width never change.
+    XCTAssertEqual(Tiling.shrinkVertically(r, top: 100, bottom: 0).minX, 10, accuracy: 0.001)
+  }
+
   func testPlacement() {
     let slot = CGRect(x: 100, y: 50, width: 800, height: 600)  // area 480_000
     // Resizable + natural >= 60% of the slot's area → fills the slot.
