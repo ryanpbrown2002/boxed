@@ -627,42 +627,73 @@ final class WindowManager {
     return n
   }
 
-  /// On mouse-up: move any window that was dragged from one boxed display onto
-  /// another boxed display into that display's layout (auto-format), and reflow
-  /// the source. A window dragged to a non-boxed display is simply released.
+  /// Each window's display at the last reconcile — to tell a *move* from a window
+  /// that's merely sitting there or newly opened.
+  private var lastSeen: [(window: AXUIElement, display: CGDirectDisplayID)] = []
+
+  private func lastSeenDisplay(_ window: AXUIElement) -> CGDirectDisplayID? {
+    lastSeen.first { CFEqual($0.window, window) }?.display
+  }
+
+  /// Snapshot where every window is (called on mouse-down) so a drag that follows
+  /// is detected as a move even if it's the first interaction.
+  func seedLastSeen() {
+    lastSeen = tileableWindows().compactMap { w in
+      currentScreen(of: w).map { (w, displayID($0)) }
+    }
+  }
+
+  /// On mouse-up: windows that left a boxed display drop out (or, if they landed
+  /// on another boxed display, join it); and a window *dragged onto* a boxed
+  /// display joins its layout. The set logic is the pure, tested `Reconcile.step`.
   func reconcileDisplays() {
-    guard !sessions.isEmpty else { return }
-
-    // Collect windows that left their session's display.
-    var movers: [(window: AXUIElement, from: CGDirectDisplayID, dest: CGDirectDisplayID?)] = []
-    for (id, s) in sessions {
-      guard let screen = screen(forID: id) else { continue }
-      for w in s.windows where !(frame(of: w).map { screenContains(screen, $0) } ?? false) {
-        let dest = currentScreen(of: w).map { displayID($0) }
-        movers.append((w, id, dest))
-      }
+    // The window universe: everything any session tracks + everything on screen.
+    var wins: [AXUIElement] = []
+    func id(of w: AXUIElement) -> Int {
+      if let i = wins.firstIndex(where: { CFEqual($0, w) }) { return i }
+      wins.append(w)
+      return wins.count - 1
     }
-    guard !movers.isEmpty else { return }
+    for s in sessions.values { for w in s.windows { _ = id(of: w) } }
+    for w in tileableWindows() { _ = id(of: w) }
 
-    var touched = Set<CGDirectDisplayID>()
-    for m in movers {
-      // Remove from source.
-      if var src = sessions[m.from] {
-        src.windows.removeAll { CFEqual($0, m.window) }
-        sessions[m.from] = src.windows.isEmpty ? nil : normalized(src)
-        touched.insert(m.from)
-      }
-      // Join the destination if it's also boxed; otherwise leave it free.
-      if let dest = m.dest, dest != m.from, sessions[dest] != nil {
-        sessions[dest]?.windows.append(m.window)
-        sessions[dest] = normalized(sessions[dest]!)
-        touched.insert(dest)
-        Log.write("auto-formatted window from display \(m.from) → \(dest)")
+    // Build the pure inputs.
+    var sessIn: [Int: [Int]] = [:]
+    for (display, s) in sessions { sessIn[Int(display)] = s.windows.map { id(of: $0) } }
+    var current: [Int: Int] = [:]
+    var previous: [Int: Int] = [:]
+    for (i, w) in wins.enumerated() {
+      if let screen = currentScreen(of: w) { current[i] = Int(displayID(screen)) }
+      if let prev = lastSeenDisplay(w) { previous[i] = Int(prev) }
+    }
+
+    let result = Reconcile.step(sessions: sessIn, current: current, previous: previous)
+
+    // Rebuild sessions, preserving each display's layout/ratios where the window
+    // set is unchanged and re-normalizing where it changed.
+    var rebuilt: [CGDirectDisplayID: Session] = [:]
+    var touched: Set<CGDirectDisplayID> = []
+    for (displayInt, ids) in result {
+      let display = CGDirectDisplayID(displayInt)
+      let newWindows = ids.map { wins[$0] }
+      guard let old = sessions[display] else { continue }
+      if sameWindowSet(old.windows, newWindows) {
+        rebuilt[display] = old
       } else {
-        Log.write("released window from display \(m.from) (destination not boxed)")
+        var n = old
+        n.windows = newWindows
+        n.vInsets = []
+        rebuilt[display] = normalized(n)
+        touched.insert(display)
+        Log.write("reconcile: display \(display) now has \(newWindows.count) window(s)")
       }
     }
-    for id in touched { if let s = sessions[id] { applyLayout(s) } }
+    // Displays that lost their session entirely were boxed before → re-tiled away.
+    for display in sessions.keys where rebuilt[display] == nil { touched.insert(display) }
+
+    sessions = rebuilt
+    lastSeen = wins.compactMap { w in currentScreen(of: w).map { (w, displayID($0)) } }
+    for display in touched { if let s = sessions[display] { applyLayout(s) } }
   }
 
   // MARK: - Window discovery

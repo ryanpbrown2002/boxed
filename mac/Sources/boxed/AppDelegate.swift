@@ -50,9 +50,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   /// Always-on: after any mouse-up, move windows that crossed between boxed
   /// displays into the destination's layout (cross-display auto-format).
   private func installDisplayReconcile() {
-    reconcileMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseUp) { [weak self] _ in
+    reconcileMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) {
+      [weak self] event in
+      guard let self else { return }
+      if event.type == .leftMouseDown {
+        self.manager.seedLastSeen()  // snapshot positions as a drag begins
+        return
+      }
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
-        guard let self else { return }
         self.manager.reconcileDisplays()
         if self.manager.editMode { self.positionSplitters() }
       }
