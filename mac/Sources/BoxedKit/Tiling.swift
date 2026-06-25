@@ -41,6 +41,31 @@ public enum Tiling {
     }
   }
 
+  /// Choose a split ratio (fraction for side 0) so each side gets at least its
+  /// minimum size out of `total`. If both fit at `fallback`, keep `fallback`
+  /// (don't disturb the user's choice). If they can't both fit, split
+  /// proportionally to their minimums. Clamped so neither side collapses.
+  public static func fitRatio(total: CGFloat, min0: CGFloat, min1: CGFloat, fallback: CGFloat)
+    -> CGFloat
+  {
+    guard total > 0 else { return fallback }
+    let need0 = min0 / total
+    let need1 = min1 / total
+    let r: CGFloat
+    if need0 + need1 <= 1 {
+      if fallback < need0 {
+        r = need0  // side 0 needs more than fallback gives it
+      } else if (1 - fallback) < need1 {
+        r = 1 - need1  // side 1 needs more
+      } else {
+        r = fallback  // both already satisfied
+      }
+    } else {
+      r = need0 / (need0 + need1)  // can't fit both — share proportionally
+    }
+    return clampRatio(r)
+  }
+
   /// Whether a slot's top/bottom edge sits at the layout's outer top/bottom (i.e.
   /// is a "free" edge, not shared with a neighbor). Accounts for the per-slot gap
   /// inset, so the tolerance must be at least the gap.

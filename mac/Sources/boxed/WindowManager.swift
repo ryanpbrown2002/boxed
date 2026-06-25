@@ -149,7 +149,7 @@ final class WindowManager {
       stackRatio: keepLayout ? old.stackRatio : 0.5,
       insetTop: keepLayout ? old.insetTop : 0, insetBottom: keepLayout ? old.insetBottom : 0,
       insetLeft: keepLayout ? old.insetLeft : 0, insetRight: keepLayout ? old.insetRight : 0)
-    applySession()
+    applyAndFitActive()
     if let name = currentLayoutName() { onReorganized?(name) }
   }
 
@@ -172,7 +172,7 @@ final class WindowManager {
     let windows = onScreen.sorted { windowArea($0) > windowArea($1) }
     session = Session(
       windows: windows, screen: screen, layoutIndex: 0, order: Array(0..<windows.count))
-    applySession()
+    applyAndFitActive()
     return currentLayoutName()
   }
 
@@ -267,7 +267,7 @@ final class WindowManager {
     next.order = order
     session = next
     Log.write("realign -> order \(order)")
-    applySession()
+    applyAndFitActive()
   }
 
   /// Debug/test hook: set an outer inset (points) directly.
@@ -318,7 +318,7 @@ final class WindowManager {
     s.layoutIndex = (s.layoutIndex + 1) % kinds.count
     s.vInsets = []  // slot meanings change with the layout — reset per-window heights
     session = s
-    applySession()
+    applyAndFitActive()
     return currentLayoutName()
   }
 
@@ -607,6 +607,15 @@ final class WindowManager {
     if let s = session { applyLayout(s) }
   }
 
+  /// Apply the active display's layout, then fit rigid windows once it settles.
+  private func applyAndFitActive() {
+    guard let id = activeDisplay, sessions[id] != nil else {
+      applySession()
+      return
+    }
+    applyAndFit(id)
+  }
+
   /// Tile one display's session (works for any display, not just the active one).
   private func applyLayout(_ s: Session) {
     let count = s.windows.count
@@ -623,6 +632,72 @@ final class WindowManager {
       place(s.windows[s.order[slot]], in: r, within: usable)
     }
     Log.write("applied \(Tiling.name(kind, count: count)) (count=\(count)) on display \(displayID(s.screen))")
+  }
+
+  /// After a layout is applied, some windows may have a minimum size larger than
+  /// their slot (e.g. a fixed dialog). Measure what actually fit and nudge the
+  /// split ratios so a rigid window gets its minimum and the flexible windows take
+  /// the remaining space — "fit the others around the fixed window". Runs once,
+  /// after the windows have settled.
+  private func fitRigid(for display: CGDirectDisplayID) {
+    guard let s = sessions[display], s.windows.count >= 2 else { return }
+    let kinds = Tiling.layouts(for: s.windows.count)
+    guard !kinds.isEmpty else { return }
+    let kind = kinds[s.layoutIndex % kinds.count]
+    guard let vertical = primarySplitVertical(kind, s.windows.count),
+      let screen = screen(forID: display)
+    else { return }
+    let eff = effectiveRect(usableRect(on: screen), s)
+    let gap = self.gap
+    let rects = Tiling.slots(
+      kind, count: s.windows.count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio)
+
+    // A window constrains the split only if it's actually *rigid*: its real size
+    // exceeds the slot it was given (it couldn't shrink to fit). Flexible windows
+    // return 0 so they yield the leftover space to the rigid one.
+    func rigidMin(_ slot: Int, width: Bool) -> CGFloat {
+      guard slot < rects.count, slot < s.order.count,
+        let f = frame(of: s.windows[s.order[slot]])
+      else { return 0 }
+      let actual = width ? f.width : f.height
+      let slotDim = width ? rects[slot].width : rects[slot].height
+      return actual > slotDim + gap ? actual : 0
+    }
+
+    var next = s
+    // Primary split: reserve the rigid side's real footprint.
+    let total = vertical ? eff.width : eff.height
+    next.ratio = Tiling.fitRatio(
+      total: total, min0: rigidMin(0, width: vertical), min1: rigidMin(1, width: vertical),
+      fallback: s.ratio)
+    // Secondary stack split for 3-window main layouts.
+    if s.windows.count == 3, kind == .mainLeft {
+      next.stackRatio = Tiling.fitRatio(
+        total: eff.height, min0: rigidMin(1, width: false), min1: rigidMin(2, width: false),
+        fallback: s.stackRatio)
+    } else if s.windows.count == 3, kind == .mainTop {
+      next.stackRatio = Tiling.fitRatio(
+        total: eff.width, min0: rigidMin(1, width: true), min1: rigidMin(2, width: true),
+        fallback: s.stackRatio)
+    }
+
+    if abs(next.ratio - s.ratio) > 0.005 || abs(next.stackRatio - s.stackRatio) > 0.005 {
+      sessions[display] = next
+      applyLayout(next)
+      Log.write(
+        "fit rigid: display \(display) ratio \(String(format: "%.2f", next.ratio)) "
+          + "stack \(String(format: "%.2f", next.stackRatio))")
+      if display == activeDisplay, let name = currentLayoutName() { onReorganized?(name) }
+    }
+  }
+
+  /// Apply a session, then fit rigid windows once the sizes have settled.
+  private func applyAndFit(_ display: CGDirectDisplayID) {
+    guard let s = sessions[display] else { return }
+    applyLayout(s)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+      self?.fitRigid(for: display)
+    }
   }
 
   /// A window count → a valid layout index that fits.
@@ -700,7 +775,7 @@ final class WindowManager {
 
     sessions = rebuilt
     lastSeen = wins.compactMap { w in currentScreen(of: w).map { (w, displayID($0)) } }
-    for display in touched { if let s = sessions[display] { applyLayout(s) } }
+    for display in touched where sessions[display] != nil { applyAndFit(display) }
   }
 
   // MARK: - Window discovery

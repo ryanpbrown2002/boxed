@@ -8,6 +8,19 @@ final class TilingTests: XCTestCase {
 
   // MARK: "compact" (don't-stretch) detection
 
+  func testFitRatio() {
+    // Both fit at the fallback → keep the fallback (don't disturb the user).
+    XCTAssertEqual(Tiling.fitRatio(total: 1000, min0: 400, min1: 400, fallback: 0.5), 0.5, accuracy: 0.001)
+    // Side 0 is rigid (needs 700) → grow it to fit; side 1 takes the rest.
+    XCTAssertEqual(Tiling.fitRatio(total: 1000, min0: 700, min1: 200, fallback: 0.5), 0.7, accuracy: 0.001)
+    // Side 1 rigid (needs 700) → shrink side 0.
+    XCTAssertEqual(Tiling.fitRatio(total: 1000, min0: 200, min1: 700, fallback: 0.5), 0.3, accuracy: 0.001)
+    // Both rigid, can't both fit → proportional.
+    XCTAssertEqual(Tiling.fitRatio(total: 1000, min0: 600, min1: 600, fallback: 0.5), 0.5, accuracy: 0.001)
+    // Extreme → clamped so neither collapses.
+    XCTAssertEqual(Tiling.fitRatio(total: 1000, min0: 980, min1: 50, fallback: 0.5), 1 - Tiling.minRatio, accuracy: 0.001)
+  }
+
   func testTouchesEdge() {
     let layout = CGRect(x: 0, y: 0, width: 1000, height: 600)
     // Regression guard: gap-inset slots still read as touching the outer edge.
