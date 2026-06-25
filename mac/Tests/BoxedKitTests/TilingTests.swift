@@ -21,6 +21,21 @@ final class TilingTests: XCTestCase {
     XCTAssertEqual(Tiling.fitRatio(total: 1000, min0: 980, min1: 50, fallback: 0.5), 1 - Tiling.minRatio, accuracy: 0.001)
   }
 
+  func testMaxOverlapIndex() {
+    // Two side-by-side displays (Cocoa coords): left 0..1710, right 1710..3630.
+    let left = CGRect(x: 0, y: 0, width: 1710, height: 1107)
+    let right = CGRect(x: 1710, y: 516, width: 1920, height: 1080)
+    // Fully inside the right display.
+    XCTAssertEqual(Tiling.maxOverlapIndex(of: CGRect(x: 2000, y: 600, width: 400, height: 300), among: [left, right]), 1)
+    // A tall window whose center hangs just past the right display's bottom edge —
+    // the center test would miss it, but it still overlaps the right display most.
+    XCTAssertEqual(Tiling.maxOverlapIndex(of: CGRect(x: 2000, y: 500, width: 800, height: 1200), among: [left, right]), 1)
+    // Straddling: more area on the left → left wins.
+    XCTAssertEqual(Tiling.maxOverlapIndex(of: CGRect(x: 1500, y: 600, width: 400, height: 300), among: [left, right]), 0)
+    // Off both displays entirely → nil.
+    XCTAssertNil(Tiling.maxOverlapIndex(of: CGRect(x: 5000, y: 5000, width: 100, height: 100), among: [left, right]))
+  }
+
   func testTouchesEdge() {
     let layout = CGRect(x: 0, y: 0, width: 1000, height: 600)
     // Regression guard: gap-inset slots still read as touching the outer edge.

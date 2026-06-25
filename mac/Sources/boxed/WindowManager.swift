@@ -1022,7 +1022,16 @@ final class WindowManager {
   /// Which display a window currently sits on (by its center), if any.
   private func currentScreen(of window: AXUIElement) -> NSScreen? {
     guard let f = frame(of: window) else { return nil }
-    return NSScreen.screens.first { screenContains($0, f) }
+    // Use the display the window overlaps most, not a strict center-point test: a
+    // window taller/wider than its display (e.g. a fixed-size dialog dragged near
+    // an edge) has its center fall off the display and would otherwise map to no
+    // display at all — orphaning it during reconcile.
+    let screens = NSScreen.screens
+    let cocoa = axToCocoa(f)
+    guard let i = Tiling.maxOverlapIndex(of: cocoa, among: screens.map { $0.frame }) else {
+      return nil
+    }
+    return screens[i]
   }
 
   // MARK: - Fullscreen

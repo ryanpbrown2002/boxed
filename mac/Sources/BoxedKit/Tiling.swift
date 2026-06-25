@@ -66,6 +66,22 @@ public enum Tiling {
     return clampRatio(r)
   }
 
+  /// Index of the rect that `frame` overlaps most — i.e. which display a window
+  /// belongs to. A center-point test is fragile for a window taller/wider than its
+  /// display (its center can fall just off the edge); the display it covers most is
+  /// the robust answer. Returns nil if `frame` overlaps none of the rects.
+  public static func maxOverlapIndex(of frame: CGRect, among rects: [CGRect]) -> Int? {
+    var best: (index: Int, area: CGFloat)?
+    for (i, r) in rects.enumerated() {
+      let inter = r.intersection(frame)
+      guard !inter.isNull else { continue }
+      let area = inter.width * inter.height
+      guard area > 0 else { continue }
+      if best == nil || area > best!.area { best = (i, area) }
+    }
+    return best?.index
+  }
+
   /// Whether a slot's top/bottom edge sits at the layout's outer top/bottom (i.e.
   /// is a "free" edge, not shared with a neighbor). Accounts for the per-slot gap
   /// inset, so the tolerance must be at least the gap.

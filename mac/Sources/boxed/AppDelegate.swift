@@ -182,6 +182,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       case "rebox": if let name = self.manager.rebox() { self.showAdjustPill(layoutName: name) }
       case "swap": if let name = self.manager.swap() { self.showAdjustPill(layoutName: name) }
       case "drop": if let name = self.manager.handleWindowDropped() { self.showAdjustPill(layoutName: name) }
+      case "seed": self.manager.seedLastSeen()  // debug: mimic mouse-down before a drag
       case "reconcile": self.manager.reconcileDisplays()
       case "dividers": self.manager.logDividers()
       case "dismiss": self.suggestionPanel.dismiss()

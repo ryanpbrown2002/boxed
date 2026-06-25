@@ -49,9 +49,26 @@ The app polls `/tmp/boxed-cmd` (~0.3s). Send a command, then wait briefly:
 echo organize > /tmp/boxed-cmd; osascript -e 'delay 0.8' >/dev/null
 ```
 
-Commands: `organize`, `rebox`, `swap`, `drop`, `reconcile`, `dismiss`,
+Commands: `organize`, `rebox`, `swap`, `drop`, `seed`, `reconcile`, `dismiss`,
 `dividers` (logs the handle list), `ratio <0..1>`, `stack <0..1>`,
 `inset <top|bottom|left|right> <pts>`, `vinset <slot> <topPts> <bottomPts>`.
+
+To simulate moving a window across displays, mimic the real drag flow: **`seed`**
+(mimics mouse-down — snapshots where each window is) → move the window with System
+Events (top-left/AX coords) → **`reconcile`** (mouse-up). Without `seed` the window
+has no "previous display", so it won't auto-join — reconcile just drops it.
+
+```bash
+echo seed > /tmp/boxed-cmd; osascript -e 'delay 0.4' >/dev/null    # mouse-down
+osascript -e 'tell application "System Events" to tell process "Google Chrome" to set position of front window to {2300, -300}'
+echo reconcile > /tmp/boxed-cmd; osascript -e 'delay 1.2' >/dev/null  # mouse-up
+```
+
+**Gotcha — destination coords.** A window counts as "on" the display it overlaps
+most; `organize` further needs the window's *center* on the target display. The
+external display can sit at negative top-left y (run `screens` + convert), so a
+tall window dropped at a small positive y hangs off its bottom and gets ignored.
+Place destination windows near the display's true top.
 
 `organize` targets the display **under the cursor** — warp first to pick one:
 
