@@ -327,8 +327,10 @@ final class WindowManager {
   func swap() -> String? {
     guard var s = session, s.order.count > 1 else { return currentLayoutName() }
     s.order = Array(s.order.dropFirst()) + [s.order[0]]
+    s.vInsets = []  // per-slot heights are meaningless once windows move slots
     session = s
-    applySession()
+    // Re-fit: the rigid window may have rotated into a different-sized slot.
+    applyAndFitActive()
     return currentLayoutName()
   }
 
