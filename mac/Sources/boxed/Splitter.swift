@@ -1,24 +1,51 @@
 import AppKit
 
-/// A thin draggable bar that sits on a layout divider.
+/// A draggable grip that sits on a layout divider. Drawn as a subtle frosted
+/// capsule with a grip line — reads on light or dark windows, and lights up in
+/// boxed's accent on hover.
 final class SplitterView: NSView {
   var vertical = true
   var onDown: (() -> Void)?
 
+  private var hovered = false
+  private var trackingArea: NSTrackingArea?
+
+  private static let accent = NSColor(srgbRed: 0.78, green: 1.0, blue: 0.23, alpha: 1)
+
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
   override func mouseDown(with event: NSEvent) { onDown?() }
+  override func mouseEntered(with event: NSEvent) { hovered = true; needsDisplay = true }
+  override func mouseExited(with event: NSEvent) { hovered = false; needsDisplay = true }
+
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    if let trackingArea { removeTrackingArea(trackingArea) }
+    let area = NSTrackingArea(
+      rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
+    addTrackingArea(area)
+    trackingArea = area
+  }
 
   override func resetCursorRects() {
     addCursorRect(bounds, cursor: vertical ? .resizeLeftRight : .resizeUpDown)
   }
 
   override func draw(_ dirtyRect: NSRect) {
-    let pill: NSRect =
-      vertical
-      ? NSRect(x: bounds.midX - 1.5, y: bounds.midY - 20, width: 3, height: 40)
-      : NSRect(x: bounds.midX - 20, y: bounds.midY - 1.5, width: 40, height: 3)
-    NSColor.white.withAlphaComponent(0.6).setFill()
-    NSBezierPath(roundedRect: pill, xRadius: 1.5, yRadius: 1.5).fill()
+    // A rounded "pill" for the long axis: a dark base (contrast on any window)
+    // with a lighter grip on top.
+    func capsule(thickness: CGFloat, length: CGFloat) -> NSBezierPath {
+      let r =
+        vertical
+        ? NSRect(x: bounds.midX - thickness / 2, y: bounds.midY - length / 2, width: thickness, height: length)
+        : NSRect(x: bounds.midX - length / 2, y: bounds.midY - thickness / 2, width: length, height: thickness)
+      return NSBezierPath(roundedRect: r, xRadius: thickness / 2, yRadius: thickness / 2)
+    }
+
+    NSColor(white: 0, alpha: hovered ? 0.4 : 0.22).setFill()
+    capsule(thickness: 7, length: hovered ? 52 : 44).fill()
+
+    (hovered ? Self.accent : NSColor(white: 1, alpha: 0.75)).setFill()
+    capsule(thickness: 3, length: hovered ? 30 : 24).fill()
   }
 }
 
