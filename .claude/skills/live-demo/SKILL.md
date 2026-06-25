@@ -1,0 +1,86 @@
+---
+name: live-demo
+description: Drive and inspect the boxed macOS app live on this Mac for manual testing — build & relaunch it, send layout commands through the /tmp/boxed-cmd hook, warp the cursor to target a display, and read back real window geometry + logs. Use when verifying boxed's tiling, multi-display, edit-mode, or fullscreen behavior on the user's real screens (behavior the unit tests can't cover).
+---
+
+# live-demo — drive & inspect boxed on this machine
+
+boxed's window/AX behavior can't be unit-tested, so verify it live: build it,
+relaunch it, send it commands through a file hook, and read back where the real
+windows actually landed. Heads-up to the user before running: **this rearranges
+their real windows and moves the cursor** — keep tests short.
+
+## 0. Setup the inspection tools (idempotent)
+
+Compile the three Swift helpers to `/tmp/boxed-demo/` if not already there. The
+sources live next to this skill in `tools/`.
+
+```bash
+D=/tmp/boxed-demo; mkdir -p "$D"
+SKILL=.claude/skills/live-demo/tools
+[ -x "$D/winz" ]    || swiftc "$SKILL/winz.swift"    -o "$D/winz"
+[ -x "$D/warp" ]    || swiftc "$SKILL/warp.swift"    -o "$D/warp"
+[ -x "$D/screens" ] || swiftc "$SKILL/screens.swift" -o "$D/screens"
+```
+
+- `/tmp/boxed-demo/winz` — lists on-screen normal windows **front→back** with size
+  and position (top-left coords): `owner WxH @(x,y)`.
+- `/tmp/boxed-demo/screens` — lists display frames (Cocoa coords).
+- `/tmp/boxed-demo/warp X Y` — moves the cursor to a point (top-left/CG coords),
+  used to choose which display `organize` targets.
+
+## 1. Build, test, relaunch
+
+```bash
+cd mac && swift build && ./scripts/test.sh        # must be green first
+./scripts/make-app.sh                             # bundle (else you test a stale binary!)
+killall boxed 2>/dev/null; rm -f /tmp/boxed.log; open boxed.app
+osascript -e 'delay 1' >/dev/null                 # let it launch + grab Accessibility
+```
+
+Confirm it's trusted: `grep accessibilityTrusted /tmp/boxed.log` → should say `true`.
+(Re-grant Accessibility once if not; the stable signing keeps it across rebuilds.)
+
+## 2. Drive it via the command hook
+
+The app polls `/tmp/boxed-cmd` (~0.3s). Send a command, then wait briefly:
+
+```bash
+echo organize > /tmp/boxed-cmd; osascript -e 'delay 0.8' >/dev/null
+```
+
+Commands: `organize`, `rebox`, `swap`, `drop`, `reconcile`, `dismiss`,
+`dividers` (logs the handle list), `ratio <0..1>`, `stack <0..1>`,
+`inset <top|bottom|left|right> <pts>`, `vinset <slot> <topPts> <bottomPts>`.
+
+`organize` targets the display **under the cursor** — warp first to pick one:
+
+```bash
+/tmp/boxed-demo/screens                                  # find display frames
+/tmp/boxed-demo/warp 855 553;  echo organize > /tmp/boxed-cmd   # box display under (855,553)
+```
+
+To simulate moving a window across displays, set its position with System Events
+(top-left/AX coords), then `reconcile`:
+
+```bash
+osascript -e 'tell application "System Events" to tell process "Safari" to set position of front window to {150, 90}'
+echo reconcile > /tmp/boxed-cmd; osascript -e 'delay 0.8' >/dev/null
+```
+
+## 3. Inspect
+
+```bash
+/tmp/boxed-demo/winz            # where every window actually is
+tail -20 /tmp/boxed.log         # what boxed decided (applied layout, reconcile, etc.)
+```
+
+## Tips & gotchas
+
+- **Always `make-app.sh` after `swift build`** or you relaunch the old binary
+  (this has burned us — the giveaway is an old log format).
+- Clear the log (`rm -f /tmp/boxed.log`) before a scenario for clean output.
+- `organize`/edit are greyed for <2 windows or a fullscreen Space (by design).
+- `winz` y-coords are top-left; `screens` are Cocoa (bottom-left) — don't mix them.
+- A 2nd-display window shows in `winz` at `x >= <display-1 width>`.
+- Found a bug? Add a unit test for the pure part (BoxedKit) so it can't regress.
