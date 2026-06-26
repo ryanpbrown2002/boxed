@@ -159,10 +159,25 @@ final class WindowManager {
   @discardableResult
   func organize() -> String? {
     guard let screen = screenUnderCursor() else { return nil }
+    return organizeFresh(on: screen)
+  }
+
+  /// Re-tile the display currently being edited from scratch — a clean fill with
+  /// the default layout, resetting ratios, insets and per-window heights. Unlike
+  /// edit's realign (which keeps those adjustments), this is the "make it fill the
+  /// whole screen again" action. Falls back to the cursor's display if none active.
+  @discardableResult
+  func reorganizeActive() -> String? {
+    guard let id = activeDisplay, let screen = screen(forID: id) else { return organize() }
+    return organizeFresh(on: screen)
+  }
+
+  /// Tile every window on `screen` into a fresh default-layout session, discarding
+  /// any prior ratios/insets for that display.
+  @discardableResult
+  private func organizeFresh(on screen: NSScreen) -> String? {
     activeDisplay = displayID(screen)
-    let onScreen = tileableWindows().filter {
-      isOn($0, screen)
-    }
+    let onScreen = tileableWindows().filter { isOn($0, screen) }
     guard !onScreen.isEmpty else {
       Log.write("organize: no windows to tile")
       return nil

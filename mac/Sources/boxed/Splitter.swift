@@ -14,7 +14,10 @@ final class SplitterView: NSView {
   var dragging = false { didSet { needsDisplay = true } }
   private var trackingArea: NSTrackingArea?
 
-  private static let accent = NSColor(srgbRed: 0.55, green: 0.8, blue: 1.0, alpha: 1)  // light blue
+  // Rest: a calm pale blue that just reads on any window. Active (hover/drag): a
+  // vivid, saturated azure — a clear hue+brightness shift, not just more opacity.
+  private static let rest = NSColor(srgbRed: 0.62, green: 0.82, blue: 1.0, alpha: 1)
+  private static let active = NSColor(srgbRed: 0.15, green: 0.55, blue: 1.0, alpha: 1)
 
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
   override func mouseDown(with event: NSEvent) { onDown?() }
@@ -46,15 +49,16 @@ final class SplitterView: NSView {
     }
 
     // Lit while hovered OR mid-drag, so it stays bright as it follows the cursor.
-    let active = hovered || dragging
+    let isActive = hovered || dragging
 
     // Faint base just for legibility on any window; grows when active.
-    NSColor(white: 0, alpha: active ? 0.2 : 0.14).setFill()
-    capsule(thickness: 6, length: active ? 60 : 46).fill()
+    NSColor(white: 0, alpha: isActive ? 0.2 : 0.14).setFill()
+    capsule(thickness: 6, length: isActive ? 60 : 46).fill()
 
-    // Light-blue grip; clearly visible at rest, brightest when active.
-    Self.accent.withAlphaComponent(active ? 0.95 : 0.72).setFill()
-    capsule(thickness: 3, length: active ? 42 : 32).fill()
+    // Grip shifts from a pale rest blue to a vivid azure when active — a clear,
+    // distinctive hue change, and a touch thicker so it visibly "grabs".
+    (isActive ? Self.active : Self.rest).withAlphaComponent(isActive ? 1.0 : 0.72).setFill()
+    capsule(thickness: isActive ? 4 : 3, length: isActive ? 42 : 32).fill()
   }
 }
 

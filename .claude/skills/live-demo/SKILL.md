@@ -49,7 +49,9 @@ The app polls `/tmp/boxed-cmd` (~0.3s). Send a command, then wait briefly:
 echo organize > /tmp/boxed-cmd; osascript -e 'delay 0.8' >/dev/null
 ```
 
-Commands: `organize`, `rebox`, `swap`, `drop`, `seed`, `reconcile`, `dismiss`,
+Commands: `organize` (smart: tile fresh, or re-align if already tiled keeping
+ratios/insets), `reorganize` (clean re-fill — resets ratios/insets/heights),
+`rebox`, `swap`, `drop`, `seed`, `reconcile`, `dismiss`,
 `dividers` (logs the handle list), `ratio <0..1>`, `stack <0..1>`,
 `inset <top|bottom|left|right> <pts>`, `vinset <slot> <topPts> <bottomPts>`.
 
