@@ -4,7 +4,6 @@ import ApplicationServices
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private var statusItem: NSStatusItem!
   private var organizeItem: NSMenuItem!
-  private var editItem: NSMenuItem!
   private var hotKeyMonitor: Any?
   private var rightClickMonitor: Any?
   private var dragSwapMonitor: Any?
@@ -70,32 +69,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   /// Stage 1: the "Organize tabs" prompt near a new window. Clicking it tiles
   /// everything, then brings up the adjust pill.
   private func showOrganizePill(near anchor: CGRect) {
-    // A clean re-fill is always offered. When the display is already tiled, also
-    // offer Edit (snap to the current layout, keeping your dragged ratios/insets)
-    // — so "Organize" stays available even in the edit state.
-    var buttons: [WindowSuggestion] = [
-      WindowSuggestion(label: manager.isAlreadyOrganized() ? "⧉  Organize" : "⧉  Organize tabs") {
-        [weak self] in self?.freshOrganize()
-      }
-    ]
-    if manager.isAlreadyOrganized() {
-      buttons.append(WindowSuggestion(label: "✎  Edit") { [weak self] in self?.organizeAndAdjust() })
+    let organize = WindowSuggestion(label: "⧉  Organize tabs") { [weak self] in
+      self?.organizeEntry()
     }
     Log.write("presenting organize pill near \(NSStringFromRect(anchor))")
-    suggestionPanel.present(title: nil, buttons, near: anchor)
+    suggestionPanel.present(title: nil, [organize], near: anchor)
   }
 
-  /// Tile the windows, then (if any moved) show the adjust pill out of the way.
-  /// Smart: organizes a fresh display, or re-aligns one that's already tiled.
-  private func organizeAndAdjust() {
-    guard let name = manager.organizeOrEdit() else { return }
-    showAdjustPill(layoutName: name)
-  }
-
-  /// A clean re-tile from scratch — reset ratios/insets and fill the screen with
-  /// the default layout. The "make it fill the whole screen again" action.
-  private func freshOrganize() {
-    guard let name = manager.organize() else { return }
+  /// The single entry point (menu item, ⌥ right-click, ⌥⌘T). If the display under
+  /// the cursor is already tiled, just open the adjust popup — don't move anything.
+  /// Otherwise tile it fresh (needs ≥2 windows and not a fullscreen Space), then
+  /// open the popup.
+  private func organizeEntry() {
+    if let name = manager.activateIfOrganized() {
+      showAdjustPill(layoutName: name)
+      return
+    }
+    guard manager.tileableCount() >= 2, !manager.isFullscreenContext(),
+      let name = manager.organize()
+    else { return }
     showAdjustPill(layoutName: name)
   }
 
@@ -106,16 +98,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     manager.editMode = true
     beginDragSwap()
     positionSplitters()
-    // Organize = re-fill this display from scratch (reset). Rebox = cycle layout.
+    // Organize = re-fill this display from scratch (reset ratios/insets/heights).
+    // Reformat = cycle to the next layout shape for this window count.
     let organize = WindowSuggestion(label: "⧉ Organize", keepsPanelOpen: true) { [weak self] in
       guard let self else { return }
       self.showAdjustPill(layoutName: self.manager.reorganizeActive() ?? layoutName)
     }
-    let rebox = WindowSuggestion(label: "▦ Rebox", keepsPanelOpen: true) { [weak self] in
+    let reformat = WindowSuggestion(label: "▦ Reformat", keepsPanelOpen: true) { [weak self] in
       guard let self else { return }
       self.showAdjustPill(layoutName: self.manager.rebox() ?? layoutName)
     }
-    suggestionPanel.present(title: nil, [organize, rebox], near: menubarAnchor(), prominent: true)
+    suggestionPanel.present(title: nil, [organize, reformat], near: menubarAnchor(), prominent: true)
   }
 
   /// A point just under the boxed menubar icon, so the pill reads as belonging to
@@ -199,8 +192,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       try? "".write(toFile: path, atomically: true, encoding: .utf8)
       Log.write("cmd: \(cmd)")
       switch cmd {
-      case "organize": self.organizeAndAdjust()
-      case "reorganize": self.freshOrganize()  // clean re-fill (reset ratios/insets)
+      case "organize": self.organizeEntry()
+      case "reorganize":  // clean re-fill (reset ratios/insets), as the popup's Organize
+        if let name = self.manager.reorganizeActive() { self.showAdjustPill(layoutName: name) }
       case "rebox": if let name = self.manager.rebox() { self.showAdjustPill(layoutName: name) }
       case "swap": if let name = self.manager.swap() { self.showAdjustPill(layoutName: name) }
       case "drop": if let name = self.manager.handleWindowDropped() { self.showAdjustPill(layoutName: name) }
@@ -241,16 +235,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     menu.autoenablesItems = false
 
     organizeItem = NSMenuItem(
-      title: "Organize tabs now", action: #selector(organizeNow), keyEquivalent: "t")
+      title: "Organize tabs", action: #selector(organizeNow), keyEquivalent: "t")
     organizeItem.keyEquivalentModifierMask = [.command, .option]
     organizeItem.target = self
     menu.addItem(organizeItem)
-
-    // Shown only once a display is tiled: re-snap to the current layout while
-    // keeping any dragged ratios/insets (vs "Organize" which resets and fills).
-    editItem = NSMenuItem(title: "Edit tabs", action: #selector(editTabs), keyEquivalent: "")
-    editItem.target = self
-    menu.addItem(editItem)
 
     let hint = NSMenuItem(
       title: "Tip: ⌥ right-click anywhere to summon", action: nil, keyEquivalent: "")
@@ -269,22 +257,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   /// Keep the organize item in step with what's on screen: disabled when there
   /// are no windows to act on, and labeled "Edit tabs" when they're already tiled.
   func menuNeedsUpdate(_ menu: NSMenu) {
-    // Need at least two windows to arrange, and a fullscreen Space can't be tiled.
-    let canOrganize = manager.tileableCount() >= 2 && !manager.isFullscreenContext()
-    let organized = canOrganize && manager.isAlreadyOrganized()
-    // "Organize tabs now" always does a clean fill; "Edit tabs" appears alongside
-    // it only once the display is already tiled.
-    organizeItem.isEnabled = canOrganize
-    editItem.isEnabled = organized
-    editItem.isHidden = !organized
+    // Enabled when the display can be tiled (≥2 windows, not a fullscreen Space)
+    // OR is already tiled — in which case clicking just opens the adjust popup
+    // without moving anything.
+    organizeItem.isEnabled =
+      manager.isAlreadyOrganized()
+      || (manager.tileableCount() >= 2 && !manager.isFullscreenContext())
   }
 
   @objc private func organizeNow() {
-    freshOrganize()
-  }
-
-  @objc private func editTabs() {
-    organizeAndAdjust()
+    organizeEntry()
   }
 
   // MARK: - Permissions
@@ -305,7 +287,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     hotKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
       let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
       if mods == [.command, .option], event.charactersIgnoringModifiers?.lowercased() == "t" {
-        self?.organizeAndAdjust()
+        self?.organizeEntry()
       }
     }
 

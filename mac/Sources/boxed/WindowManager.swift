@@ -190,33 +190,18 @@ final class WindowManager {
     return currentLayoutName()
   }
 
-  /// The "Organize tabs" action. If the same windows are already in a session,
-  /// just re-align them to the current layout (preserving the layout choice and
-  /// any dragged ratios) instead of remixing from scratch. Only a changed set of
-  /// windows triggers a fresh organize.
-  @discardableResult
-  func organizeOrEdit() -> String? {
-    guard let screen = screenUnderCursor() else { return nil }
-    if fullscreenWindow(on: screen) != nil {
-      Log.write("fullscreen display — not organizing/editing")
-      return nil
-    }
-    activeDisplay = displayID(screen)
-    let onScreen = tileableWindows().filter {
-      isOn($0, screen)
-    }
-    // Nothing to arrange with a single window — don't tile it to "Full".
-    guard onScreen.count >= 2 else {
-      Log.write("only one window on this display — not organizing")
-      return nil
-    }
-
-    if let s = session, sameWindowSet(s.windows, onScreen) {
-      Log.write("re-align (already organized) — keeping \(currentLayoutName() ?? "layout")")
-      realignToNearestSlots()  // snap to nearest slot; keep layout + dragged ratios
-      return currentLayoutName()
-    }
-    return organize()
+  /// If the display under the cursor is already tiled with its current windows,
+  /// make it the active display and return its layout name — so the caller can open
+  /// the adjust popup *without moving anything*. nil if it isn't organized yet (or
+  /// is a fullscreen Space), in which case the caller decides whether to tile fresh.
+  func activateIfOrganized() -> String? {
+    guard let screen = screenUnderCursor(), fullscreenWindow(on: screen) == nil else { return nil }
+    let id = displayID(screen)
+    guard let s = sessions[id] else { return nil }
+    let onScreen = tileableWindows().filter { isOn($0, screen) }
+    guard !onScreen.isEmpty, sameWindowSet(s.windows, onScreen) else { return nil }
+    activeDisplay = id
+    return currentLayoutName()
   }
 
   private func sameWindowSet(_ a: [AXUIElement], _ b: [AXUIElement]) -> Bool {
@@ -239,49 +224,6 @@ final class WindowManager {
       isOn($0, screen)
     }
     return !onScreen.isEmpty && sameWindowSet(s.windows, onScreen)
-  }
-
-  /// Re-assign windows to the current layout's slots by nearest position — each
-  /// window snaps to the slot closest to where it already is — while preserving
-  /// the layout choice and any dragged ratios. "Match the closest place, but
-  /// organized." This avoids replaying a stale order that would shuffle windows.
-  private func realignToNearestSlots() {
-    guard let s = session else { return }
-    let count = s.windows.count
-    let kinds = Tiling.layouts(for: count)
-    guard !kinds.isEmpty else { return }
-    let kind = kinds[s.layoutIndex % kinds.count]
-    let rects = Tiling.slots(
-      kind, count: count, in: effectiveRect(usableRect(on: s.screen), s), gap: gap, ratio: s.ratio,
-      stackRatio: s.stackRatio)
-    guard rects.count == count else {
-      applySession()
-      return
-    }
-
-    let centers = s.windows.map { frame(of: $0).map { CGPoint(x: $0.midX, y: $0.midY) } }
-    var used = Set<Int>()
-    var order = [Int](repeating: 0, count: count)
-    for slot in 0..<count {
-      let target = CGPoint(x: rects[slot].midX, y: rects[slot].midY)
-      var best = -1
-      var bestDist = CGFloat.greatestFiniteMagnitude
-      for w in 0..<count where !used.contains(w) {
-        let d = centers[w].map { hypot($0.x - target.x, $0.y - target.y) } ?? .greatestFiniteMagnitude
-        if d < bestDist {
-          bestDist = d
-          best = w
-        }
-      }
-      if best < 0 { best = (0..<count).first { !used.contains($0) } ?? slot }
-      used.insert(best)
-      order[slot] = best
-    }
-    var next = s
-    next.order = order
-    session = next
-    Log.write("realign -> order \(order)")
-    applyAndFitActive()
   }
 
   /// Debug/test hook: set an outer inset (points) directly.
