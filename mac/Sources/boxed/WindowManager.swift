@@ -860,6 +860,11 @@ final class WindowManager {
     sessions = rebuilt
     lastSeen = wins.compactMap { w in currentScreen(of: w).map { (w, displayID($0)) } }
     for display in touched where sessions[display] != nil { applyAndFit(display) }
+    // If a window joined or left the display being edited, refresh the pill so its
+    // layout diagram and the divider handles match the new arrangement.
+    if let active = activeDisplay, touched.contains(active), let name = currentLayoutName() {
+      onReorganized?(name)
+    }
   }
 
   // MARK: - Window discovery
