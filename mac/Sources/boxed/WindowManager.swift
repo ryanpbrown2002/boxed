@@ -158,14 +158,46 @@ final class WindowManager {
     let windows = alive + newcomers
     guard !windows.isEmpty else { return }
     let keepLayout = windows.count == old.windows.count
-    session = Session(
+    let next = Session(
       windows: windows, screen: screen, layoutIndex: keepLayout ? old.layoutIndex : 0,
       order: Array(0..<windows.count), ratio: keepLayout ? old.ratio : 0.5,
       stackRatio: keepLayout ? old.stackRatio : 0.5,
       insetTop: keepLayout ? old.insetTop : 0, insetBottom: keepLayout ? old.insetBottom : 0,
       insetLeft: keepLayout ? old.insetLeft : 0, insetRight: keepLayout ? old.insetRight : 0)
+
+    // "Reveal desktop"/Show Desktop parks the managed windows off-screen and ignores
+    // setPosition until they're restored — so a new window would tile alone. Detect
+    // it (a managed window isn't actually on screen) and dismiss it by activating a
+    // *different* app than the frontmost (that brings every window back); settle,
+    // then place. Otherwise place immediately — the common case isn't disturbed.
+    let visible = onScreenWindows()
+    let parked = alive.contains { w in
+      guard let f = frame(of: w), let p = pid(of: w) else { return false }
+      return !isVisible(f, pid: p, in: visible)
+    }
+    let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+    if parked, let switchTo = windows.compactMap({ pid(of: $0) }).first(where: { $0 != front }) {
+      NSRunningApplication(processIdentifier: switchTo)?.activate()
+      let restore = newcomers.last.flatMap(pid(of:))  // keep focus on what the user opened
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+        guard let self else { return }
+        self.finishReflow(next)
+        restore.flatMap { NSRunningApplication(processIdentifier: $0) }?.activate()
+      }
+    } else {
+      finishReflow(next)
+    }
+  }
+
+  private func finishReflow(_ next: Session) {
+    session = next
     applyAndFitActive()
     if let name = currentLayoutName() { onReorganized?(name) }
+  }
+
+  private func pid(of window: AXUIElement) -> pid_t? {
+    var p: pid_t = 0
+    return AXUIElementGetPid(window, &p) == .success ? p : nil
   }
 
   // MARK: - Organize session
