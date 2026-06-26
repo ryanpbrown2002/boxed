@@ -34,14 +34,22 @@ A tiny `Paths.temp(_:)` helper centralizes the per-user paths.
 
 ## Electron (parked — safe hardening only)
 
-- **E1** `will-attach-webview` (strip nodeIntegration/preload, lock prefs) +
-  `setWindowOpenHandler` (deny by default) on the webview's web-contents.
+Done:
+- **E1** `will-attach-webview` (strip nodeIntegration/preload, force sandbox) +
+  `setWindowOpenHandler` (deny in-app windows; route http/https to the system
+  browser) on every web-contents, via `app.on('web-contents-created')`.
 - **E2** "Open in real browser" → `shell.openExternal` via a new preload method
-  (`openExternal`, http/https only) instead of `window.open`.
-- **E3** strict CSP `<meta>` in `index.html`; document the font-bundling follow-up.
-- **E5** `sandbox: true` on the BrowserWindow (preload only needs ipc/contextBridge).
-- **E4** (per-tab partitions) and **E6** (Electron version bumps) are noted, not done
-  — E4 trades away shared logins (product call); E6 is ongoing maintenance.
+  (`openExternal`), with main validating http/https only — instead of `window.open`.
+- **E5** `sandbox: true` on the BrowserWindow (preload only needs ipc/contextBridge;
+  e2e confirms it still launches).
+
+Deferred (with reason):
+- **E3** CSP — correct only done *with* font-bundling (`@fontsource`) and verified
+  across dev (Vite HMR) **and** packaged builds; a half CSP breaks `pnpm dev` or
+  gives false assurance. React already escapes (no active XSS sink), so this is
+  defense-in-depth. Do it as a dedicated change when the Electron app is revived.
+- **E4** per-tab partitions — trades away shared logins (a product decision).
+- **E6** Electron version bumps — ongoing maintenance, not a one-off code change.
 
 ## Verify
 

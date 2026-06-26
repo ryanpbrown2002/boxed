@@ -8,6 +8,8 @@ const boxed = {
   togglePin: (): Promise<boolean> => ipcRenderer.invoke('win:togglePin'),
   /** Current always-on-top state. */
   isPinned: (): Promise<boolean> => ipcRenderer.invoke('win:isPinned'),
+  /** Open a link in the real browser (main validates it's http/https). */
+  openExternal: (url: string): void => ipcRenderer.send('shell:openExternal', url),
   platform: process.platform
 }
 

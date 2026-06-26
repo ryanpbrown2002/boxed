@@ -270,7 +270,7 @@ function Box({ col, row, url, focused, onFocus, onSetUrl }: BoxProps): JSX.Eleme
   }
   const openExternal = (): void => {
     const u = normalizeUrl(draft)
-    if (u) window.open(u, '_blank')
+    if (u) window.boxed?.openExternal(u)
   }
 
   return (

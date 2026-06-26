@@ -1,5 +1,19 @@
 import { join } from 'path'
-import { app, BrowserWindow, Tray, Menu, globalShortcut, nativeImage, ipcMain } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  Tray,
+  Menu,
+  globalShortcut,
+  nativeImage,
+  ipcMain,
+  shell
+} from 'electron'
+
+/** Only http(s) may be handed to the system browser — never file:, javascript:, etc. */
+function openExternalSafely(url: unknown): void {
+  if (typeof url === 'string' && /^https?:\/\//i.test(url)) void shell.openExternal(url)
+}
 
 let win: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -25,7 +39,7 @@ function createWindow(): void {
     titleBarStyle: 'hidden',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
       webviewTag: true // each tab is a real, isolated browser process
@@ -77,6 +91,21 @@ function createTray(): void {
   tray.on('click', toggleWindow)
 }
 
+// Lock down every web-contents, including each <webview> tab: never let embedded
+// (possibly hostile) pages attach a Node-enabled preload or spawn in-app windows.
+app.on('web-contents-created', (_e, contents) => {
+  contents.on('will-attach-webview', (_evt, webPreferences) => {
+    delete webPreferences.preload
+    webPreferences.nodeIntegration = false
+    webPreferences.contextIsolation = true
+    webPreferences.sandbox = true
+  })
+  contents.setWindowOpenHandler(({ url }) => {
+    openExternalSafely(url) // route real links to the system browser; deny in-app windows
+    return { action: 'deny' }
+  })
+})
+
 app.whenReady().then(() => {
   // Menubar app: hide the dock icon on macOS.
   if (process.platform === 'darwin') app.dock?.hide()
@@ -109,3 +138,6 @@ ipcMain.handle('win:togglePin', () => {
 })
 
 ipcMain.handle('win:isPinned', () => win?.isAlwaysOnTop() ?? true)
+
+// Open a link in the real browser (http/https only) — safer than renderer window.open.
+ipcMain.on('shell:openExternal', (_e, url: string) => openExternalSafely(url))
