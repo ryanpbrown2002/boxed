@@ -1,10 +1,10 @@
 # ▣ boxed
 
-**A Mac window manager for lazy multitaskers.**
+**Instantly organize your open windows. Make the most of your screen.**
 
-You've got four things open and you don't want to drag-snap each one into place.
-boxed lives in your menubar: hit a shortcut and every window on the screen tiles
-itself into a clean layout. Open more, organize again, denser layout. That's it.
+boxed lives in your menubar: hit a shortcut and every window on the display tiles
+itself into a clean layout — no dragging, no snapping into corners. Open another
+window, organize again, and the layout adapts.
 
 It never moves anything on its own — boxed only acts when you ask. No window to
 maximize into, no dock icon, nothing forced.
@@ -75,10 +75,8 @@ display that isn't boxed and it's just let go.
   boxed sits out there.
 - `setup-signing.sh` lets the permission stick across rebuilds (grant it once).
 
-The native app lives in [`mac/`](mac/) — see [its README](mac/README.md) for the
-details and tests. Two earlier experiments are kept for reference: an Electron
-"tabs in one window" app at the repo root, and a plain-HTML sketch in
-[`prototype/`](prototype/).
+The app lives in [`mac/`](mac/) — see [its README](mac/README.md) for the
+architecture, code map, and tests.
 
 ## License
 

@@ -4,159 +4,113 @@ This file is the contract for working in this repo. Read it before making change
 
 ## What boxed is (and is not)
 
-boxed is a **non-invasive, floating, always-on-top menubar window** that tiles
-the user's tabs into a customizable, resizable grid. The guiding feeling is
-"gets out of the way." Every design decision is judged against that.
+boxed is a **native macOS tiling window manager** — a menubar agent (`LSUIElement`,
+no dock icon). Summon it and it tiles your real OS windows on the active display
+into a clean layout. It never embeds anything, and it never moves a window on its
+own. The guiding feeling is "gets out of the way."
 
-- DO keep the chrome minimal and the window small/floating by default.
-- DO favor summon/dismiss (hotkey + tray) over a persistent fullscreen presence.
-- DON'T turn it into a heavy dashboard, a browser replacement, or a fullscreen app.
-- DON'T add chrome that competes with the user's content for attention.
+- DO keep boxed's only presence the menubar `▣` and a small, transient pill.
+- DO favor summon/dismiss (hotkey, ⌥ right-click, menubar) over persistent UI.
+- DON'T auto-rearrange windows or disrupt the normal macOS workflow — tiling fires
+  only on a user's click or shortcut.
+- DON'T turn it into a heavy dashboard or a fullscreen app.
+
+The app lives in [`mac/`](mac/) (Swift Package Manager). It is the whole product —
+there is no web/Electron component.
 
 ## Architecture & boundaries
 
-- **Three processes, three folders.** `src/main` (Node/Electron), `src/preload`
-  (bridge), `src/renderer` (React UI). Keep them separate.
-- **Security is non-negotiable.** The renderer runs with `contextIsolation: true`
-  and `nodeIntegration: false`. The renderer must NOT import Electron or Node
-  APIs directly. Anything the UI needs from the main process goes through the
-  `window.boxed` bridge in `src/preload/index.ts` (and its type in `index.d.ts`).
-- **`<webview>` is how tabs are embedded** — not iframes. Keep webviews on the
-  `persist:boxed` partition so logins persist.
-- **Keep logic out of components.** Pure, testable logic (URL handling, layout
-  math) lives in `src/renderer/src/lib/*` and must have Vitest coverage. React
-  components wire that logic to the DOM; they should stay thin.
+- **Pure layout logic lives in `Sources/BoxedKit` and is unit-tested** — no AppKit
+  or Accessibility APIs in this target, so it stays testable. `Tiling.swift` (which
+  layouts per count, names, slot geometry, weighted partitions for rigid windows,
+  feasibility), `Layout.swift` (BSP fallback for 5+), `Reconcile.swift` (cross-display
+  moves), `Undo.swift` (capture policy).
+- **All window manipulation goes through the Accessibility API in `WindowManager`**
+  (`Sources/boxed`), which acts only on a user's click or shortcut — never on its own.
+- The UI is a menubar `NSStatusItem`, a transient non-activating `NSPanel` pill
+  (`SuggestionPanel`), and draggable divider handles (`Splitter`); `AppDelegate`
+  wires it together. Keep the chrome minimal.
 
 ## Conventions
 
-- TypeScript everywhere; no `any` without a written reason.
-- Prettier formatting (no semicolons, single quotes, width 100) — run `pnpm format`.
-- ESLint must pass — run `pnpm lint`.
-- Follow the existing file's style; match its naming and comment density.
-- Comments explain *why*, not *what*. The prototype's terse, lowercase UI voice
-  is intentional — keep copy lowercase and calm.
+- Swift; match the existing files' style, naming, and comment density.
+- Comments explain *why*, not *what*. The terse, lowercase UI voice is intentional —
+  keep copy lowercase and calm.
 
 ## Definition of done (run before every commit)
 
 > **ALWAYS re-run the full test suite after ANY change — no exceptions.** A change
-> that "obviously can't break anything" still must be verified green before it's
-> done or committed. For the native app that means:
+> that "obviously can't break anything" still must be verified green:
 > ```bash
 > cd mac && swift build && ./scripts/test.sh
 > ```
-> Tests passing is necessary but not sufficient: the suite only covers the pure
+> Tests passing is necessary but not sufficient: the suite covers the pure
 > `BoxedKit` logic. If you touched window/AX behavior, ALSO re-verify the real
-> behavior via the `$TMPDIR/boxed-cmd` hook + `CGWindowList` inspection (rebuild with
-> `./scripts/make-app.sh` first) — and when a regression slips through, add a test
-> that would have caught it.
-
-For the parked Electron app:
-
-```bash
-pnpm typecheck && pnpm lint && pnpm test
-```
-
-If you touched main-process behavior or the rendered layout, also run
-`pnpm test:e2e` (it builds and launches the real app).
-
-When adding a feature with non-trivial logic, add or update a unit test in
-`tests/unit`. When adding user-visible flows, consider extending the Playwright
-smoke test in `tests/e2e`.
+> behavior via the `live-demo` skill (the `$TMPDIR/boxed-cmd` hook + `CGWindowList`
+> inspection; rebuild with `./scripts/make-app.sh` first) — and when a regression
+> slips through, add a test that would have caught it.
 
 ## Test-driven development (do this)
 
 When fixing a bug or adding logic with a testable core, write the test FIRST:
 
-1. Extract the decision into pure code in `mac/Sources/BoxedKit` (no AppKit/AX).
-2. Add a failing test in `mac/Tests/BoxedKitTests`; run `./scripts/test.sh` and
-   watch it go red.
+1. Extract the decision into pure code in `Sources/BoxedKit` (no AppKit/AX).
+2. Add a failing test in `Tests/BoxedKitTests`; run `./scripts/test.sh` and watch it
+   go red.
 3. Implement until green. Don't edit the test to fit a wrong implementation.
 
 If the behavior is inherently AppKit / Accessibility / window-server (z-order,
 focus, real window placement) it can't be a pure unit test — verify it through the
-`$TMPDIR/boxed-cmd` hook + `CGWindowList` inspection instead, and say so explicitly.
+`live-demo` skill instead, and say so explicitly.
+
+**Large/multi-part features: write a short spec in `mac/docs/` first** (problem,
+design, test plan) and confirm the approach before implementing — see the existing
+specs there (e.g. `docs/docker-desktop-gate.md`).
 
 ## Git workflow
 
-- Small, focused commits. Conventional-commit style prefixes: `feat:`, `fix:`,
-  `chore:`, `refactor:`, `test:`, `docs:`.
-- Only commit/push when the user asks. The user wants to "push as we go" — so it
-  is expected here, but still confirm the commit message intent if ambiguous.
-- Never commit `out/`, `release/`, or `node_modules/` (see `.gitignore`).
+- Small, focused commits. Conventional-commit prefixes: `feat:`, `fix:`, `chore:`,
+  `refactor:`, `test:`, `docs:`.
+- Only commit/push when the user asks. The user wants to "push as we go" — expected
+  here, but confirm the message intent if ambiguous.
+- Never commit `mac/.build` or `mac/boxed.app` (see `.gitignore`).
 
-## Direction (read this — the project pivoted)
+## How it works
 
-boxed is now a **native macOS tiling window manager** in [`mac/`](mac/) (Swift). It
-arranges the user's *real* OS windows; it does not embed anything. The Electron app
-at the repo root is **parked** — an earlier "container" approach — kept for
-reference but not the active product. Don't add features to it without being asked.
-
-**Core principle — suggest, don't force.** boxed must NOT auto-rearrange windows
-or disrupt the normal macOS workflow. When a new window opens it offers a small,
-transient, non-activating prompt with context-aware placement options; if the user
-ignores it, nothing moves. The only en-masse action is the explicit, user-invoked
-"Tidy all". Do not reintroduce automatic tiling as a default.
-
-For the native app:
-
-- **Layout system lives in `Sources/BoxedKit` (pure, tested).** `Tiling.swift`
-  decides which layouts each window count offers, their names, slot geometry,
-  weighted partitions for rigid windows, and feasibility (`fits`); `Layout.swift` is
-  the BSP fallback for 5+; `Reconcile.swift` is the cross-display move logic. No
-  AppKit/window APIs in BoxedKit — keep it that way so it stays unit-testable.
 - The flow: **Organize windows** tiles every window on the display under the cursor
   with that count's default layout (the `WindowManager` "organize session"). A pill
   then offers **Reformat** (cycle to the next layout that *fits* — shown as a tiny
-  diagram of the current layout via `LayoutPreview`, not a name) and **↺ Reset**
-  (re-fill from scratch, clearing tweaks); **drag a window onto another** swaps them,
-  **drag the handles** resize. Summoning when already tiled re-snaps drifted windows
-  back into the layout (a tidy display isn't disturbed). Fires only on a click/shortcut.
+  diagram of the current layout via `LayoutPreview`, not a name), **↺ Reset** (re-fill
+  from scratch, clearing tweaks), and **↩ Undo** (restore the pre-organize state).
+  **Drag a window onto another** swaps them; **drag the handles** resize. Summoning
+  when already tiled re-snaps drifted windows (a tidy display isn't disturbed).
 - **Rigid (min-size) windows** (e.g. Docker Desktop floors at ~940×600):
-  `WindowManager` probes each window's hard minimum once (a brief one-time resize),
-  then `Tiling` weights Columns/Rows/Grid so the rigid window keeps its footprint
-  and the rest stretch around it (`weightedLengths`), dividers clamp at its edge
-  (`fitRatio`), and Reformat skips layouts that can't fit it (`fits`). Resizable
-  windows always fill their slot; only non-resizable ones keep their size.
-- All window manipulation goes through the Accessibility API in `WindowManager`,
-  which acts only on a user's click or shortcut — never on its own.
-- The pill (`SuggestionPanel`) is a non-activating `NSPanel` that lingers then
-  fades. Keep it unobtrusive; it doubles as boxed's only "presence."
-- Summon paths: ⌥ right-click anywhere, ⌥⌘T (immediate), menubar. Keep ⌥ gating
-  on the right-click so normal context menus are never hijacked.
-- **Signing:** `scripts/setup-signing.sh` creates a stable self-signed identity so
-  the Accessibility grant persists across rebuilds. `make-app.sh` uses it if
-  present. Don't go back to ad-hoc-only — it forces a re-grant every build.
+  `WindowManager` learns each window's minimum as a side effect of tiling, then
+  `Tiling` weights Columns/Rows/Grid so the rigid window keeps its footprint and the
+  rest stretch around it (`weightedLengths`), dividers clamp at its edge (`fitRatio`),
+  and Reformat skips layouts that can't fit it (`fits`). Resizable windows always
+  fill their slot; only non-resizable ones keep their size.
+- Summon paths: ⌥ right-click anywhere, ⌥⌘T (immediate), menubar. Keep ⌥ gating on
+  the right-click so normal context menus are never hijacked.
+- Each display gets its own layout; when both are boxed, dragging a window across
+  auto-tiles it (`Reconcile`). The pill lands on the display you organized.
+- **Signing (dev only):** `scripts/setup-signing.sh` creates a stable self-signed
+  identity so the Accessibility grant persists across rebuilds; `make-app.sh` uses
+  it. These scripts are LOCAL DEVELOPMENT ONLY — distribution needs a real Developer
+  ID + hardened runtime + notarization.
 - **Tests:** `scripts/test.sh` runs the XCTest suite (it locates a full Xcode and
-  sets `DEVELOPER_DIR`, since the Command Line Tools can't run `swift test`). Add a
-  test in `Tests/BoxedKitTests` whenever you touch layout logic.
+  sets `DEVELOPER_DIR`). Add a test in `Tests/BoxedKitTests` whenever you touch
+  layout logic.
 - `Log.swift` writes to `$TMPDIR/boxed.log` (per-user, 0600 — not world-readable
   /tmp). The `$TMPDIR/boxed-cmd` test hook is **off** unless launched with
   `BOXED_CMD_HOOK=1` (`open --env BOXED_CMD_HOOK=1 boxed.app`); it's a dev affordance
   (lets any local process drive boxed's AX-granted control), never a product feature.
-- It's a menubar agent (`LSUIElement`, `.accessory` activation) — no dock icon,
-  no main window. Keep it that way; "gets out of the way" still rules.
-- Build with `cd mac && ./scripts/make-app.sh`; verify `swift build` compiles and
-  `./scripts/test.sh` is green before committing. AX/window behavior that isn't
-  unit-testable: verify live with the `live-demo` skill (`$TMPDIR/boxed-cmd` hook +
-  `CGWindowList`).
-- **Large/multi-part features: write a short spec in `mac/docs/` first** (problem,
-  design, test plan) and confirm the approach before implementing — see
-  `docs/docker-desktop-gate.md`.
+- Build with `cd mac && ./scripts/make-app.sh`.
 
 ## Roadmap guardrails
 
-- **Phase 1 (now):** Tier 1 — Accessibility only. BSP auto-tiling of the active
-  display, live reflow on open/close, menubar + hotkey. Make it feel great.
-- **Phase 2 (later, opt-in):** multi-Space / multi-display orchestration, which
-  needs a partial SIP disable (the yabai tier). Do NOT pursue without explicit
-  direction — it's a system-wide security change.
-- Electron packaging/signing config in `electron-builder.yml` is dormant; ignore
-  unless the parked Electron app is explicitly revived.
-
-## Known rough edges to fix as we go
-
-- The renderer loads fonts from Google Fonts over the network. Before shipping,
-  bundle them (e.g. `@fontsource`) so the app works offline and needs no relaxed CSP.
-- There is no Content-Security-Policy yet; harden the renderer before release.
-- The tray uses a text glyph (`▣`) instead of an icon asset — replace with a
-  proper template image when we have artwork.
+- **Phase 1 (now):** Accessibility only — tiling of the active display, menubar +
+  hotkey, multi-display reconcile. Make it feel great.
+- **Phase 2 (later, opt-in):** multi-Space orchestration (other Spaces / fullscreen
+  apps), which needs a partial SIP disable (the yabai tier). Do NOT pursue without
+  explicit direction — it's a system-wide security change.

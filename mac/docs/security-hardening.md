@@ -34,6 +34,10 @@ A tiny `Paths.temp(_:)` helper centralizes the per-user paths.
 
 ## Electron (parked — safe hardening only)
 
+> Historical: the parked Electron app was **removed from the repo** after this work
+> (the native app is the whole product now). This section records what was done at
+> the time; the code it refers to no longer exists.
+
 Done:
 - **E1** `will-attach-webview` (strip nodeIntegration/preload, force sandbox) +
   `setWindowOpenHandler` (deny in-app windows; route http/https to the system
