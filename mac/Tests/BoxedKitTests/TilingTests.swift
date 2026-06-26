@@ -21,6 +21,68 @@ final class TilingTests: XCTestCase {
     XCTAssertEqual(Tiling.fitRatio(total: 1000, min0: 980, min1: 50, fallback: 0.5), 1 - Tiling.minRatio, accuracy: 0.001)
   }
 
+  func testWeightedLengths() {
+    // Nothing rigid → even split.
+    XCTAssertEqual(Tiling.weightedLengths(mins: [0, 0, 0], total: 900), [300, 300, 300])
+    // One rigid (600); the two flexibles split the 400 of slack.
+    let w = Tiling.weightedLengths(mins: [600, 0, 0], total: 1000)
+    XCTAssertEqual(w[0], 600, accuracy: 0.001)
+    XCTAssertEqual(w[1], 200, accuracy: 0.001)
+    XCTAssertEqual(w[2], 200, accuracy: 0.001)
+    // All rigid but they fit → each gets its min plus a proportional share of slack.
+    let f = Tiling.weightedLengths(mins: [400, 400], total: 1000)
+    XCTAssertEqual(f[0], 500, accuracy: 0.001)
+    XCTAssertEqual(f[1], 500, accuracy: 0.001)
+    // Over-constrained → protect the largest mins first; the rest take what's left.
+    // (Docker 940 + Safari 574 + Code 400 = 1914 can't fit 1702.)
+    let o = Tiling.weightedLengths(mins: [940, 574, 400], total: 1702)
+    XCTAssertEqual(o[0], 940, accuracy: 0.001)  // Docker protected
+    XCTAssertEqual(o[1], 574, accuracy: 0.001)  // Safari protected
+    XCTAssertEqual(o[2], 188, accuracy: 0.001)  // Code takes the remainder
+    XCTAssertEqual(Tiling.weightedLengths(mins: [], total: 500), [])
+  }
+
+  func testLayoutFits() {
+    let size = CGSize(width: 1702, height: 993)
+    let docker = CGSize(width: 940, height: 600)
+    let safari = CGSize(width: 574, height: 0)
+    let code = CGSize(width: 400, height: 0)
+    // Three windows 940+574+400 wide can't fit side by side → Columns infeasible.
+    XCTAssertFalse(Tiling.fits(.columns, count: 3, in: size, mins: [docker, safari, code]))
+    // But Rows fits (each spans the full width; 600 + 0 + 0 of height fits).
+    XCTAssertTrue(Tiling.fits(.rows, count: 3, in: size, mins: [docker, safari, code]))
+    // Main + stack: Docker main (940) + widest stack (574) = 1514 ≤ 1702 → fits.
+    XCTAssertTrue(Tiling.fits(.mainLeft, count: 3, in: size, mins: [docker, safari, code]))
+    // No minimums → everything fits.
+    XCTAssertTrue(Tiling.fits(.grid, count: 4, in: size, mins: []))
+  }
+
+  func testWeightedColumnsRowsGrid() {
+    let r = CGRect(x: 0, y: 0, width: 1000, height: 600)
+    // Rigid window (min width 600) in column 0 of 3 → 600 / 200 / 200.
+    let cols = Tiling.slots(
+      .columns, count: 3, in: r, gap: 0, mins: [CGSize(width: 600, height: 0), .zero, .zero])
+    XCTAssertEqual(cols[0].width, 600, accuracy: 0.001)
+    XCTAssertEqual(cols[1].width, 200, accuracy: 0.001)
+    XCTAssertEqual(cols[2].minX, 800, accuracy: 0.001)
+    // Rigid height 400 in row 1 of 3 → 100 / 400 / 100.
+    let rows = Tiling.slots(
+      .rows, count: 3, in: r, gap: 0, mins: [.zero, CGSize(width: 0, height: 400), .zero])
+    XCTAssertEqual(rows[1].height, 400, accuracy: 0.001)
+    XCTAssertEqual(rows[0].height, 100, accuracy: 0.001)
+    // Grid 2×2, rigid cell 0 needs 700×450 → col0=700/col1=300, row0=450/row1=150.
+    let g = Tiling.slots(
+      .grid, count: 4, in: r, gap: 0, mins: [CGSize(width: 700, height: 450), .zero, .zero, .zero])
+    XCTAssertEqual(g[0].width, 700, accuracy: 0.001)
+    XCTAssertEqual(g[0].height, 450, accuracy: 0.001)
+    XCTAssertEqual(g[1].width, 300, accuracy: 0.001)  // top-right column
+    XCTAssertEqual(g[2].height, 150, accuracy: 0.001)  // bottom-left row
+    // No mins → unchanged even grid (regression guard).
+    let even = Tiling.slots(.grid, count: 4, in: r, gap: 0)
+    XCTAssertEqual(even[0].width, 500, accuracy: 0.001)
+    XCTAssertEqual(even[0].height, 300, accuracy: 0.001)
+  }
+
   func testMaxOverlapIndex() {
     // Two side-by-side displays (Cocoa coords): left 0..1710, right 1710..3630.
     let left = CGRect(x: 0, y: 0, width: 1710, height: 1107)

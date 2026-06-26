@@ -66,6 +66,96 @@ public enum Tiling {
     return clampRatio(r)
   }
 
+  /// Partition `total` among `count` items so each *rigid* item (min > 0) gets at
+  /// least its minimum and the slack is split evenly among the *flexible* items
+  /// (min == 0). Falls back to sharing proportionally when the minimums can't all
+  /// fit, and to an even split when nothing is constrained. This is how a layout
+  /// stretches the flexible windows around a fixed-min-size one.
+  public static func weightedLengths(mins: [CGFloat], total: CGFloat) -> [CGFloat] {
+    let n = mins.count
+    guard n > 0 else { return [] }
+    guard total > 0 else { return Array(repeating: 0, count: n) }
+    let m = mins.map { max(0, $0) }
+    let reserved = m.reduce(0, +)
+    if reserved <= 0 { return Array(repeating: total / CGFloat(n), count: n) }  // nothing rigid
+    if reserved > total {
+      // Over-constrained: the minimums can't all fit. Protect the largest mins first
+      // — a hard-min window (Docker) must keep its size — and let whatever can't fit
+      // share the remainder. (Such a layout should usually be skipped entirely; this
+      // is the graceful floor if it's applied anyway.)
+      var result = [CGFloat](repeating: 0, count: n)
+      var remaining = total
+      let order = (0..<n).sorted { m[$0] > m[$1] }
+      var i = 0
+      while i < n, m[order[i]] > 0, m[order[i]] <= remaining {
+        result[order[i]] = m[order[i]]
+        remaining -= m[order[i]]
+        i += 1
+      }
+      let rest = Array(order[i...])
+      let wsum = rest.reduce(0) { $0 + max(m[$1], 1) }
+      if wsum > 0 { for idx in rest { result[idx] = remaining * max(m[idx], 1) / wsum } }
+      return result
+    }
+    // Everything fits. Rigid items get their min; the slack goes to the flexible
+    // ones (or, if all are rigid, bumps each proportionally to fill the space).
+    let slack = total - reserved
+    let flexible = m.filter { $0 <= 0 }.count
+    if flexible > 0 {
+      let each = slack / CGFloat(flexible)
+      return m.map { $0 > 0 ? $0 : each }
+    }
+    return m.map { $0 + slack * $0 / reserved }
+  }
+
+  /// Whether `count` windows with the given per-slot minimums can be tiled under
+  /// `kind` within `size` without a window overflowing — used to skip layouts that
+  /// genuinely can't fit a rigid window (e.g. three windows whose min widths exceed
+  /// the screen) when cycling layouts. `mins` is in slot order; for Main + stack /
+  /// row, slot 0 is the main window.
+  public static func fits(_ kind: LayoutKind, count: Int, in size: CGSize, mins: [CGSize]) -> Bool {
+    guard count > 0 else { return true }
+    func mn(_ i: Int) -> CGSize { i < mins.count ? mins[i] : .zero }
+    let (w, h) = (size.width, size.height)
+    let all = (0..<count).map { mn($0) }
+    switch kind {
+    case .bsp: return true
+    case .columns:
+      return all.reduce(0) { $0 + $1.width } <= w && all.allSatisfy { $0.height <= h }
+    case .rows:
+      return all.reduce(0) { $0 + $1.height } <= h && all.allSatisfy { $0.width <= w }
+    case .grid:
+      let cols = max(1, Int(ceil(Double(count).squareRoot())))
+      let rowCount = max(1, Int(ceil(Double(count) / Double(cols))))
+      var colW = [CGFloat](repeating: 0, count: cols)
+      var rowH = [CGFloat](repeating: 0, count: rowCount)
+      for i in 0..<count {
+        colW[i % cols] = max(colW[i % cols], mn(i).width)
+        rowH[i / cols] = max(rowH[i / cols], mn(i).height)
+      }
+      return colW.reduce(0, +) <= w && rowH.reduce(0, +) <= h
+    case .mainLeft:  // main full height on the left; the rest stacked on the right
+      let stack = (1..<count).map { mn($0) }
+      let stackW = stack.map { $0.width }.max() ?? 0
+      let stackH = stack.reduce(0) { $0 + $1.height }
+      return mn(0).width + stackW <= w && mn(0).height <= h && stackH <= h
+    case .mainTop:  // main full width on top; the rest in a row below
+      let stack = (1..<count).map { mn($0) }
+      let stackH = stack.map { $0.height }.max() ?? 0
+      let stackW = stack.reduce(0) { $0 + $1.width }
+      return mn(0).height + stackH <= h && mn(0).width <= w && stackW <= w
+    }
+  }
+
+  /// Per-slot minimum in one dimension, padded to `n` and bumped by `gap` so the
+  /// gap/2 inset applied to each slot still leaves the window's true minimum.
+  private static func minDim(_ mins: [CGSize], _ n: Int, gap: CGFloat, width: Bool) -> [CGFloat] {
+    (0..<n).map { i in
+      let m = i < mins.count ? (width ? mins[i].width : mins[i].height) : 0
+      return m > 0 ? m + gap : 0
+    }
+  }
+
   /// Index of the rect that `frame` overlaps most — i.e. which display a window
   /// belongs to. A center-point test is fragile for a window taller/wider than its
   /// display (its center can fall just off the edge); the display it covers most is
@@ -150,20 +240,28 @@ public enum Tiling {
   /// left/right divide for Left-Right, top/bottom for Top-Bottom, and the
   /// main-vs-stack divide for Main + stack / row. It's ignored by layouts without
   /// a single primary split (even Columns/Rows of 3+, Grid, BSP).
+  /// `mins[slot]` (when supplied) is the learned hard minimum of the window in that
+  /// slot. Columns/Rows of 3+ and Grid use it to weight their partitions so a
+  /// rigid window keeps its minimum and the others shrink around it; the
+  /// ratio-driven layouts ignore it (their fit is handled via `ratio`).
   public static func slots(
     _ kind: LayoutKind, count: Int, in rect: CGRect, gap: CGFloat = 8, ratio: CGFloat = 0.5,
-    stackRatio: CGFloat = 0.5
+    stackRatio: CGFloat = 0.5, mins: [CGSize] = []
   ) -> [CGRect] {
     guard count > 0, rect.width > 0, rect.height > 0 else { return [] }
     switch kind {
     case .bsp:
       return Layout.bsp(count: count, in: rect, gap: gap)  // already gap-inset
     case .columns:
-      return inset(count == 2 ? twoSplit(rect, ratio: ratio, vertical: true) : columns(count, rect), by: gap)
+      return inset(
+        count == 2 ? twoSplit(rect, ratio: ratio, vertical: true) : columns(count, rect, mins: mins, gap: gap),
+        by: gap)
     case .rows:
-      return inset(count == 2 ? twoSplit(rect, ratio: ratio, vertical: false) : rows(count, rect), by: gap)
+      return inset(
+        count == 2 ? twoSplit(rect, ratio: ratio, vertical: false) : rows(count, rect, mins: mins, gap: gap),
+        by: gap)
     case .grid:
-      return inset(grid(count, rect), by: gap)
+      return inset(grid(count, rect, mins: mins, gap: gap), by: gap)
     case .mainLeft:
       return inset(mainLeft(count, rect, ratio: ratio, stackRatio: stackRatio), by: gap)
     case .mainTop:
@@ -189,29 +287,47 @@ public enum Tiling {
 
   // MARK: - partitions (exact, no gap)
 
-  static func columns(_ n: Int, _ r: CGRect) -> [CGRect] {
-    let w = r.width / CGFloat(n)
-    return (0..<n).map {
-      CGRect(x: r.minX + CGFloat($0) * w, y: r.minY, width: w, height: r.height)
+  static func columns(_ n: Int, _ r: CGRect, mins: [CGSize] = [], gap: CGFloat = 0) -> [CGRect] {
+    let widths = weightedLengths(mins: minDim(mins, n, gap: gap, width: true), total: r.width)
+    var x = r.minX
+    return widths.map { w in
+      defer { x += w }
+      return CGRect(x: x, y: r.minY, width: w, height: r.height)
     }
   }
 
-  static func rows(_ n: Int, _ r: CGRect) -> [CGRect] {
-    let h = r.height / CGFloat(n)
-    return (0..<n).map {
-      CGRect(x: r.minX, y: r.minY + CGFloat($0) * h, width: r.width, height: h)
+  static func rows(_ n: Int, _ r: CGRect, mins: [CGSize] = [], gap: CGFloat = 0) -> [CGRect] {
+    let heights = weightedLengths(mins: minDim(mins, n, gap: gap, width: false), total: r.height)
+    var y = r.minY
+    return heights.map { h in
+      defer { y += h }
+      return CGRect(x: r.minX, y: y, width: r.width, height: h)
     }
   }
 
-  static func grid(_ n: Int, _ r: CGRect) -> [CGRect] {
+  static func grid(_ n: Int, _ r: CGRect, mins: [CGSize] = [], gap: CGFloat = 0) -> [CGRect] {
     let cols = max(1, Int(ceil(Double(n).squareRoot())))
     let rowCount = max(1, Int(ceil(Double(n) / Double(cols))))
-    let cw = r.width / CGFloat(cols)
-    let ch = r.height / CGFloat(rowCount)
+    // A column's min width is the widest min among its windows; a row's min height
+    // the tallest among its — then weight columns/rows so a rigid cell's row and
+    // column grow and the rest shrink around it.
+    var colMin = [CGFloat](repeating: 0, count: cols)
+    var rowMin = [CGFloat](repeating: 0, count: rowCount)
+    for i in 0..<n {
+      let m = i < mins.count ? mins[i] : .zero
+      let c = i % cols, rw = i / cols
+      if m.width > 0 { colMin[c] = max(colMin[c], m.width + gap) }
+      if m.height > 0 { rowMin[rw] = max(rowMin[rw], m.height + gap) }
+    }
+    let colW = weightedLengths(mins: colMin, total: r.width)
+    let rowH = weightedLengths(mins: rowMin, total: r.height)
+    var colX = [CGFloat](repeating: r.minX, count: cols)
+    for c in 1..<cols where cols > 1 { colX[c] = colX[c - 1] + colW[c - 1] }
+    var rowY = [CGFloat](repeating: r.minY, count: rowCount)
+    for rw in 1..<rowCount where rowCount > 1 { rowY[rw] = rowY[rw - 1] + rowH[rw - 1] }
     return (0..<n).map { i in
-      let col = i % cols
-      let row = i / cols
-      return CGRect(x: r.minX + CGFloat(col) * cw, y: r.minY + CGFloat(row) * ch, width: cw, height: ch)
+      let c = i % cols, rw = i / cols
+      return CGRect(x: colX[c], y: rowY[rw], width: colW[c], height: rowH[rw])
     }
   }
 

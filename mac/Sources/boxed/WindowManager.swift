@@ -292,13 +292,24 @@ final class WindowManager {
       min0: slotMin(s, a, width: widthDim), min1: slotMin(s, b, width: widthDim), fallback: raw)
   }
 
-  /// Cycle to the next layout for the current window count and re-apply.
+  /// Cycle to the next layout for the current window count and re-apply, skipping
+  /// any layout whose windows can't fit (a rigid window like Docker makes some
+  /// layouts impossible — e.g. three windows too wide to sit side by side). Lands
+  /// on the next layout that does fit; if none do, advances by one anyway.
   @discardableResult
   func rebox() -> String? {
     guard var s = session else { return nil }
     let kinds = Tiling.layouts(for: s.windows.count)
     guard !kinds.isEmpty else { return nil }
-    s.layoutIndex = (s.layoutIndex + 1) % kinds.count
+    let eff = effectiveRect(usableRect(on: s.screen), s)
+    let mins = slotMins(s)
+    var idx = s.layoutIndex
+    for _ in 0..<kinds.count {
+      idx = (idx + 1) % kinds.count
+      if Tiling.fits(kinds[idx], count: s.windows.count, in: eff.size, mins: mins) { break }
+      Log.write("rebox: skipping \(Tiling.name(kinds[idx], count: s.windows.count)) — windows don't fit")
+    }
+    s.layoutIndex = idx
     s.vInsets = []  // slot meanings change with the layout — reset per-window heights
     session = s
     applyAndFitActive()
@@ -345,7 +356,7 @@ final class WindowManager {
     let kind = kinds[s.layoutIndex % kinds.count]
     let rects = Tiling.slots(
       kind, count: count, in: effectiveRect(usableRect(on: s.screen), s), gap: gap, ratio: s.ratio,
-      stackRatio: s.stackRatio)
+      stackRatio: s.stackRatio, mins: slotMins(s))
     guard rects.count == count else { return nil }
 
     let centers = (0..<count).map { slot in
@@ -495,7 +506,8 @@ final class WindowManager {
     // the layout's top/bottom). An inner edge shared with a neighbor is owned by
     // the split divider, so we don't stack a handle there (that was moving both).
     let raw = Tiling.slots(
-      kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio)
+      kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio,
+      mins: slotMins(s))
     for slot in 0..<min(count, raw.count) {
       let vi = slot < s.vInsets.count ? s.vInsets[slot] : (top: CGFloat(0), bottom: CGFloat(0))
       let f = Tiling.shrinkVertically(raw[slot], top: vi.top, bottom: vi.bottom)
@@ -545,7 +557,8 @@ final class WindowManager {
     case .edgeRight: s.insetRight = clampInset(usable.maxX - point.x, usable.width)
     case .windowTop(let slot):
       let raw = Tiling.slots(
-        kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio)
+        kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio,
+        mins: slotMins(s))
       if slot < raw.count {
         ensureVInsets(&s, count)
         let top = max(0, axY - raw[slot].minY)
@@ -553,7 +566,8 @@ final class WindowManager {
       }
     case .windowBottom(let slot):
       let raw = Tiling.slots(
-        kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio)
+        kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio,
+        mins: slotMins(s))
       if slot < raw.count {
         ensureVInsets(&s, count)
         let bottom = max(0, raw[slot].maxY - axY)
@@ -622,7 +636,8 @@ final class WindowManager {
     let usable = usableRect(on: s.screen)
     let eff = effectiveRect(usable, s)
     let rects = Tiling.slots(
-      kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio)
+      kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio,
+      mins: slotMins(s))
     for slot in 0..<min(count, rects.count) {
       let vi = slot < s.vInsets.count ? s.vInsets[slot] : (top: CGFloat(0), bottom: CGFloat(0))
       let r = Tiling.shrinkVertically(rects[slot], top: vi.top, bottom: vi.bottom)
@@ -641,13 +656,19 @@ final class WindowManager {
     let kinds = Tiling.layouts(for: s.windows.count)
     guard !kinds.isEmpty else { return }
     let kind = kinds[s.layoutIndex % kinds.count]
-    guard let vertical = primarySplitVertical(kind, s.windows.count),
-      let screen = screen(forID: display)
-    else { return }
+    guard let screen = screen(forID: display) else { return }
+    guard let vertical = primarySplitVertical(kind, s.windows.count) else {
+      // Non-ratio layout (Columns/Rows of 3+, Grid): the first apply learned any
+      // rigid window's minimum; re-apply so the weighted slots stretch the others
+      // around it.
+      applyLayout(s)
+      return
+    }
     let eff = effectiveRect(usableRect(on: screen), s)
     let gap = self.gap
     let rects = Tiling.slots(
-      kind, count: s.windows.count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio)
+      kind, count: s.windows.count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio,
+      mins: slotMins(s))
 
     // A window constrains the split only if it's actually *rigid*: its real size
     // exceeds the slot it was given (it couldn't shrink to fit). Flexible windows
@@ -938,6 +959,14 @@ final class WindowManager {
     guard slot >= 0, slot < s.order.count else { return 0 }
     let m = minSize(of: s.windows[s.order[slot]])
     return width ? m.width : m.height
+  }
+
+  /// Learned minimums in slot order — fed to `Tiling.slots` so weighted layouts
+  /// (Columns/Rows of 3+, Grid) can stretch the flexible windows around a rigid one.
+  private func slotMins(_ s: Session) -> [CGSize] {
+    (0..<s.windows.count).map { slot in
+      slot < s.order.count ? minSize(of: s.windows[s.order[slot]]) : .zero
+    }
   }
 
   // MARK: - Natural sizes
