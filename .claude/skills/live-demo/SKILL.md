@@ -108,4 +108,12 @@ tail -20 $TMPDIR/boxed.log         # what boxed decided (applied layout, reconci
 - `organize`/edit are greyed for <2 windows or a fullscreen Space (by design).
 - `winz` y-coords are top-left; `screens` are Cocoa (bottom-left) — don't mix them.
 - A 2nd-display window shows in `winz` at `x >= <display-1 width>`.
+- **Cross-display/multi-window repros are fragile — verify window state with `winz`
+  first.** These burned a lot of time: an app may have *no* open windows (moving its
+  "front window" silently no-ops — e.g. Chrome with no window), `AXMinimized` doesn't
+  reliably stick, and apps like Safari accumulate windows across `make new document`
+  calls. Before driving a cross-display move, confirm the exact window you mean to
+  move actually exists in `winz` and is on the display you think — then move *that*
+  one. Fresh-launched windows also tend to open on whatever display macOS considers
+  active, not the one under your cursor.
 - Found a bug? Add a unit test for the pure part (BoxedKit) so it can't regress.
