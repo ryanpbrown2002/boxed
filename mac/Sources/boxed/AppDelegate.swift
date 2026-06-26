@@ -110,7 +110,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       buttons.append(
         WindowSuggestion(label: "↩ Undo") { [weak self] in self?.manager.undoLastLayout() })
     }
-    suggestionPanel.present(title: nil, buttons, near: menubarAnchor(), prominent: true)
+    suggestionPanel.present(title: nil, buttons, near: adjustPillAnchor(), prominent: true)
+  }
+
+  /// Where the adjust pill should appear: under the menubar ▣ when it's on the
+  /// display we just organized, otherwise at the top-center of that display — so
+  /// the pill always lands on the screen you acted on, even when the menubar icon
+  /// is on a different display.
+  private func adjustPillAnchor() -> CGRect {
+    guard let active = manager.activeScreen() else { return menubarAnchor() }
+    if let itemScreen = statusItem.button?.window?.screen,
+      manager.displayID(itemScreen) == manager.displayID(active)
+    {
+      return menubarAnchor()
+    }
+    return CGRect(x: active.frame.midX, y: active.visibleFrame.maxY, width: 0, height: 0)
   }
 
   /// A point just under the boxed menubar icon, so the pill reads as belonging to

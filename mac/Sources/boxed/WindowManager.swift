@@ -1116,6 +1116,13 @@ final class WindowManager {
     NSScreen.screens.first { displayID($0) == id }
   }
 
+  /// The screen of the display currently being organized/edited — so the adjust
+  /// pill can be placed on the display you just acted on, not wherever the menubar
+  /// icon happens to live.
+  func activeScreen() -> NSScreen? {
+    activeDisplay.flatMap { screen(forID: $0) }
+  }
+
   /// The display the cursor is currently on (where organize/edit should target).
   func screenUnderCursor() -> NSScreen? {
     let point = NSEvent.mouseLocation
