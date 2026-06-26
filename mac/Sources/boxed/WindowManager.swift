@@ -88,6 +88,15 @@ final class WindowManager {
 
   @objc private func appsChanged(_ note: Notification) {
     observeRunningApps()
+    // A freshly launched app's first window is created before we can attach our
+    // window-created observer, so that event is missed. In edit mode, reflow on
+    // launch so the tileable-window scan slots the new window into the layout (the
+    // scan doesn't depend on the create event). New windows of already-running apps
+    // still come through the observer normally.
+    if note.name == NSWorkspace.didLaunchApplicationNotification, editMode, !draggingSplitter {
+      Log.write("app launched during edit mode -> reflow")
+      scheduleReflow()
+    }
   }
 
   func handleWindowCreated(_ window: AXUIElement) {
