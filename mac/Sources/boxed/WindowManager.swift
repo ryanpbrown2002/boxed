@@ -287,7 +287,10 @@ final class WindowManager {
   /// Debug/test hook: log the current draggable handles.
   func logDividers() {
     let ds = dividers()
-    Log.write("dividers (\(ds.count)): " + ds.map { "\($0.kind)" }.joined(separator: ", "))
+    Log.write(
+      "dividers (\(ds.count)): "
+        + ds.map { "\($0.kind)@(\(Int($0.frame.minX)),\(Int($0.frame.minY)) \(Int($0.frame.width))x\(Int($0.frame.height)))" }
+        .joined(separator: ", "))
   }
 
   /// Debug/test hook: set a slot's per-window height trim directly.
@@ -487,16 +490,24 @@ final class WindowManager {
     }
 
     // Outer left/right margins (the layout's horizontal insets). Top/bottom are
-    // handled per-window below.
+    // handled per-window below. Clamp on-screen so an edge handle sitting on the
+    // screen border isn't half cut off (its panel would otherwise straddle the
+    // edge); dragging math is cursor-based, so nudging the handle inward is free.
     out.append(
       Divider(
         kind: .edgeLeft,
-        frame: axToCocoa(CGRect(x: eff.minX - grab / 2, y: eff.minY, width: grab, height: eff.height)),
+        frame: axToCocoa(
+          Tiling.clampOnscreen(
+            CGRect(x: eff.minX - grab / 2, y: eff.minY, width: grab, height: eff.height),
+            within: usable)),
         vertical: true))
     out.append(
       Divider(
         kind: .edgeRight,
-        frame: axToCocoa(CGRect(x: eff.maxX - grab / 2, y: eff.minY, width: grab, height: eff.height)),
+        frame: axToCocoa(
+          Tiling.clampOnscreen(
+            CGRect(x: eff.maxX - grab / 2, y: eff.minY, width: grab, height: eff.height),
+            within: usable)),
         vertical: true))
 
     // Per-window height handles — only on a window's FREE outer edges (those at

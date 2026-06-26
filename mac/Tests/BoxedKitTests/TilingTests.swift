@@ -64,6 +64,11 @@ final class TilingTests: XCTestCase {
     XCTAssertEqual(
       Tiling.clampOnscreen(CGRect(x: 900, y: 700, width: 300, height: 300), within: b),
       CGRect(x: 700, y: 500, width: 300, height: 300))
+    // Spills past left/top (negative origin) → pulled back to the edge. This is the
+    // edge-divider case: a handle centered on x=0 would straddle the screen border.
+    XCTAssertEqual(
+      Tiling.clampOnscreen(CGRect(x: -8, y: -8, width: 16, height: 200), within: b),
+      CGRect(x: 0, y: 0, width: 16, height: 200))
     // Bigger than the bounds → top-left aligned (title bar stays reachable).
     XCTAssertEqual(
       Tiling.clampOnscreen(CGRect(x: 50, y: 50, width: 1200, height: 900), within: b),

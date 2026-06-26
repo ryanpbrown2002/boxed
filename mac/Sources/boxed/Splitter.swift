@@ -8,6 +8,10 @@ final class SplitterView: NSView {
   var onDown: (() -> Void)?
 
   private var hovered = false
+  /// True while a drag is in progress. The panel follows the cursor mid-drag, so
+  /// the pointer leaves the tracking area and `hovered` goes false — `dragging`
+  /// keeps the handle lit until the drag actually ends.
+  var dragging = false { didSet { needsDisplay = true } }
   private var trackingArea: NSTrackingArea?
 
   private static let accent = NSColor(srgbRed: 0.55, green: 0.8, blue: 1.0, alpha: 1)  // light blue
@@ -41,13 +45,16 @@ final class SplitterView: NSView {
       return NSBezierPath(roundedRect: r, xRadius: thickness / 2, yRadius: thickness / 2)
     }
 
-    // Faint base just for legibility on any window; grows a touch on hover.
-    NSColor(white: 0, alpha: hovered ? 0.16 : 0.07).setFill()
-    capsule(thickness: 6, length: hovered ? 40 : 28).fill()
+    // Lit while hovered OR mid-drag, so it stays bright as it follows the cursor.
+    let active = hovered || dragging
 
-    // Subtle light-blue grip; quietly there at rest, clearer on hover.
-    Self.accent.withAlphaComponent(hovered ? 0.9 : 0.38).setFill()
-    capsule(thickness: 3, length: hovered ? 26 : 18).fill()
+    // Faint base just for legibility on any window; grows when active.
+    NSColor(white: 0, alpha: active ? 0.2 : 0.14).setFill()
+    capsule(thickness: 6, length: active ? 60 : 46).fill()
+
+    // Light-blue grip; clearly visible at rest, brightest when active.
+    Self.accent.withAlphaComponent(active ? 0.95 : 0.72).setFill()
+    capsule(thickness: 3, length: active ? 42 : 32).fill()
   }
 }
 
@@ -88,6 +95,7 @@ final class Splitter {
 
   private func beginTracking() {
     endTracking()
+    view.dragging = true
     localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) {
       [weak self] event in
       self?.handle(event)
@@ -109,6 +117,7 @@ final class Splitter {
   }
 
   private func endTracking() {
+    view.dragging = false
     if let m = localMonitor { NSEvent.removeMonitor(m); localMonitor = nil }
     if let m = globalMonitor { NSEvent.removeMonitor(m); globalMonitor = nil }
   }
