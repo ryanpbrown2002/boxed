@@ -28,6 +28,12 @@ final class WindowManager {
   /// Windows boxed just resized, so the resulting resize echo isn't mistaken for a
   /// user resize. (window, ignore-until).
   private var recentlySized: [(window: AXUIElement, until: DispatchTime)] = []
+  /// Learned hard minimum sizes. A window that won't shrink to the size we asked
+  /// for can't go smaller, so its measured size is a lower bound on its minimum
+  /// (Docker Desktop, e.g., floors at 940×600). Used to stop a divider at a rigid
+  /// window's edge and to weight layouts around it. Learned as a side effect of
+  /// tiling — no destructive probing.
+  private var minSizes: [(window: AXUIElement, size: CGSize)] = []
 
   private struct Session {
     var windows: [AXUIElement]
@@ -259,13 +265,31 @@ final class WindowManager {
     applySession()
   }
 
-  /// Debug/test hook: set the split ratios directly.
+  /// Debug/test hook: set the split ratios directly (clamped to rigid mins, same
+  /// as a real divider drag).
   func setRatios(primary: CGFloat?, stack: CGFloat?) {
     guard var s = session else { return }
-    if let primary { s.ratio = Tiling.clampRatio(primary) }
-    if let stack { s.stackRatio = Tiling.clampRatio(stack) }
+    if let primary { s.ratio = clampedSplit(s, primary: true, raw: primary) }
+    if let stack { s.stackRatio = clampedSplit(s, primary: false, raw: stack) }
     session = s
     applySession()
+  }
+
+  /// Clamp a split ratio so neither adjacent window drops below its learned minimum
+  /// — the divider stops at a rigid window's edge rather than letting the neighbor
+  /// slide under it. `primary` selects the main split (slots 0/1, primary
+  /// orientation) vs the stack split (slots 1/2, the perpendicular orientation).
+  private func clampedSplit(_ s: Session, primary: Bool, raw: CGFloat) -> CGFloat {
+    let kinds = Tiling.layouts(for: s.windows.count)
+    guard !kinds.isEmpty,
+      let primaryVertical = primarySplitVertical(kinds[s.layoutIndex % kinds.count], s.windows.count)
+    else { return Tiling.clampRatio(raw) }
+    let eff = effectiveRect(usableRect(on: s.screen), s)
+    let widthDim = primary ? primaryVertical : !primaryVertical  // stack splits the other axis
+    let (a, b) = primary ? (0, 1) : (1, 2)
+    return Tiling.fitRatio(
+      total: widthDim ? eff.width : eff.height,
+      min0: slotMin(s, a, width: widthDim), min1: slotMin(s, b, width: widthDim), fallback: raw)
   }
 
   /// Cycle to the next layout for the current window count and re-apply.
@@ -508,11 +532,15 @@ final class WindowManager {
 
     switch ds[index].kind {
     case .primary:
-      s.ratio = Tiling.clampRatio(
-        ds[index].vertical ? (point.x - eff.minX) / eff.width : (axY - eff.minY) / eff.height)
+      let vertical = ds[index].vertical
+      let raw = vertical ? (point.x - eff.minX) / eff.width : (axY - eff.minY) / eff.height
+      // Stop the divider at a rigid neighbor's minimum instead of sliding the other
+      // window under it.
+      s.ratio = clampedSplit(s, primary: true, raw: raw)
     case .stack:
-      s.stackRatio = Tiling.clampRatio(
-        ds[index].vertical ? (point.x - eff.minX) / eff.width : (axY - eff.minY) / eff.height)
+      let vertical = ds[index].vertical  // the stack divides slots 1 and 2
+      let raw = vertical ? (point.x - eff.minX) / eff.width : (axY - eff.minY) / eff.height
+      s.stackRatio = clampedSplit(s, primary: false, raw: raw)
     case .edgeLeft: s.insetLeft = clampInset(point.x - usable.minX, usable.width)
     case .edgeRight: s.insetRight = clampInset(usable.maxX - point.x, usable.width)
     case .windowTop(let slot):
@@ -871,15 +899,45 @@ final class WindowManager {
     setPosition(window, target.origin)
     if resizable { setSize(window, target.size) }
     setPosition(window, target.origin)  // re-anchor for apps that recenter on resize
+    guard let actual = frame(of: window) else { return }
+    // Learn a hard minimum: a window that wouldn't shrink to the size we requested
+    // can't go any smaller, so its measured size is a floor on its min.
+    if resizable { learnMin(window, requested: target.size, actual: actual.size) }
     // If the window has a minimum size larger than its slot, it stayed big and may
     // now spill off the display — nudge it back on-screen. Skip mid-drag so a
     // resize against a fixed window doesn't jitter.
-    if !draggingSplitter, let actual = frame(of: window) {
+    if !draggingSplitter {
       let fitted = Tiling.clampOnscreen(actual, within: bounds)
       if abs(fitted.minX - actual.minX) > 0.5 || abs(fitted.minY - actual.minY) > 0.5 {
         setPosition(window, fitted.origin)
       }
     }
+  }
+
+  /// Merge a new observation into the learned minimum (a per-dimension max). Only
+  /// counts a dimension where the window overshot what we asked for.
+  private func learnMin(_ window: AXUIElement, requested: CGSize, actual: CGSize) {
+    var size = minSize(of: window)
+    if actual.width > requested.width + 2 { size.width = max(size.width, actual.width) }
+    if actual.height > requested.height + 2 { size.height = max(size.height, actual.height) }
+    guard size.width > 0 || size.height > 0 else { return }
+    if let i = minSizes.firstIndex(where: { CFEqual($0.window, window) }) {
+      minSizes[i].size = size
+    } else {
+      minSizes.append((window, size))
+    }
+  }
+
+  /// The learned hard minimum, or .zero (unknown → treated as fully flexible).
+  func minSize(of window: AXUIElement) -> CGSize {
+    minSizes.first(where: { CFEqual($0.window, window) })?.size ?? .zero
+  }
+
+  /// A slot's window's learned min in one dimension (0 if unknown/out of range).
+  private func slotMin(_ s: Session, _ slot: Int, width: Bool) -> CGFloat {
+    guard slot >= 0, slot < s.order.count else { return 0 }
+    let m = minSize(of: s.windows[s.order[slot]])
+    return width ? m.width : m.height
   }
 
   // MARK: - Natural sizes
