@@ -197,17 +197,20 @@ final class WindowManager {
     return currentLayoutName()
   }
 
-  /// If the display under the cursor is already tiled with its current windows,
-  /// make it the active display and return its layout name — so the caller can open
-  /// the adjust popup *without moving anything*. nil if it isn't organized yet (or
-  /// is a fullscreen Space), in which case the caller decides whether to tile fresh.
-  func activateIfOrganized() -> String? {
+  /// If the display under the cursor is already boxed with this same set of windows,
+  /// re-apply its current layout — snapping any windows that have drifted out of
+  /// their slots back into place, while keeping the layout, ratios and tweaks. When
+  /// nothing has moved this is a no-op (so it never reshuffles a tidy display).
+  /// Returns the layout name so the caller can open the pill; nil if the display
+  /// isn't organized yet (or is a fullscreen Space) and a fresh tile is needed.
+  func retileIfOrganized() -> String? {
     guard let screen = screenUnderCursor(), fullscreenWindow(on: screen) == nil else { return nil }
     let id = displayID(screen)
     guard let s = sessions[id] else { return nil }
     let onScreen = tileableWindows().filter { isOn($0, screen) }
     guard !onScreen.isEmpty, sameWindowSet(s.windows, onScreen) else { return nil }
     activeDisplay = id
+    applyLayout(s)  // re-snap drifted windows; preserves order/ratios/insets
     return currentLayoutName()
   }
 

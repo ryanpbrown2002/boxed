@@ -81,7 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
   /// Otherwise tile it fresh (needs ≥2 windows and not a fullscreen Space), then
   /// open the popup.
   private func organizeEntry() {
-    if let name = manager.activateIfOrganized() {
+    if let name = manager.retileIfOrganized() {
       showAdjustPill(layoutName: name)
       return
     }
