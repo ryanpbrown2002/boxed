@@ -23,7 +23,8 @@ final class WindowManager {
   private var reflowPending = false
   /// A window's "natural" size: recorded at creation (before boxed tiles it) and
   /// updated when the user manually resizes it — never from boxed's own tiling.
-  /// Used to decide whether a window fills its slot or stays small.
+  /// Only used to place windows that *can't* be resized; resizable windows always
+  /// fill their slot.
   private var naturalSizes: [(window: AXUIElement, size: CGSize)] = []
   /// Windows boxed just resized, so the resulting resize echo isn't mistaken for a
   /// user resize. (window, ignore-until).

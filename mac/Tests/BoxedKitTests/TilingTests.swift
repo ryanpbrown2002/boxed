@@ -150,17 +150,16 @@ final class TilingTests: XCTestCase {
   }
 
   func testPlacement() {
-    let slot = CGRect(x: 100, y: 50, width: 800, height: 600)  // area 480_000
-    // Resizable + natural >= 60% of the slot's area → fills the slot.
+    let slot = CGRect(x: 100, y: 50, width: 800, height: 600)
+    // A resizable window always fills its slot — even a small one (organizing uses
+    // the space; guards the "small window stayed small on a big display" gripe).
     XCTAssertEqual(
       Tiling.placement(slot: slot, natural: CGSize(width: 700, height: 500), resizable: true), slot)
-    // Resizable + natural MUCH smaller than the slot → keeps natural, top-right.
     XCTAssertEqual(
-      Tiling.placement(slot: slot, natural: CGSize(width: 300, height: 200), resizable: true),
-      CGRect(x: 600, y: 50, width: 300, height: 200))  // x = slot.maxX - 300
-    // Unknown natural (.zero) → fill. (Guards the "everything stayed small" bug.)
+      Tiling.placement(slot: slot, natural: CGSize(width: 300, height: 200), resizable: true), slot)
+    // Unknown natural (.zero) → fill.
     XCTAssertEqual(Tiling.placement(slot: slot, natural: .zero, resizable: true), slot)
-    // Non-resizable always keeps its size (capped to the slot), anchored top-right.
+    // Non-resizable keeps its size (capped to the slot), anchored top-right.
     XCTAssertEqual(
       Tiling.placement(slot: slot, natural: CGSize(width: 300, height: 200), resizable: false),
       CGRect(x: 600, y: 50, width: 300, height: 200))

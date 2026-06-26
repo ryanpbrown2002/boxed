@@ -205,21 +205,12 @@ public enum Tiling {
     return CGRect(x: rect.minX, y: rect.minY + t, width: rect.width, height: h)
   }
 
-  /// A window keeps its natural size (rather than filling) when its natural area
-  /// is below this fraction of the slot's area. Tuned so a small window in a big
-  /// half-slot stays small, but most windows fill a small quarter-slot.
-  public static let keepNaturalBelow: CGFloat = 0.6
-
-  /// Where a window goes within its slot. A window fills the slot — UNLESS it
-  /// can't be resized, or its natural size is much smaller than the slot, in which
-  /// case it keeps its natural size anchored to the slot's top-right (top-left
-  /// origin), capped to the slot. `natural` of .zero means "unknown" → fill.
+  /// Where a window goes within its slot. A resizable window fills the slot —
+  /// organizing is meant to use the space. Only a window that *can't* be resized
+  /// keeps its size (capped to the slot), anchored to the slot's top-right
+  /// (top-left origin). `natural` of .zero means "unknown" → fill.
   public static func placement(slot: CGRect, natural: CGSize, resizable: Bool) -> CGRect {
-    let slotArea = slot.width * slot.height
-    let naturalArea = natural.width * natural.height
-    let muchSmaller = naturalArea > 0 && slotArea > 0 && naturalArea < keepNaturalBelow * slotArea
-    let keepNatural = !resizable || muchSmaller
-    guard keepNatural, natural.width > 0, natural.height > 0 else { return slot }
+    guard !resizable, natural.width > 0, natural.height > 0 else { return slot }
     let w = min(natural.width, slot.width)
     let h = min(natural.height, slot.height)
     return CGRect(x: slot.maxX - w, y: slot.minY, width: w, height: h)
