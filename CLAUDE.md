@@ -100,13 +100,22 @@ ignores it, nothing moves. The only en-masse action is the explicit, user-invoke
 For the native app:
 
 - **Layout system lives in `Sources/BoxedKit` (pure, tested).** `Tiling.swift`
-  decides which layouts each window count offers, their names, and slot geometry;
-  `Layout.swift` is the BSP fallback for 5+. No AppKit/window APIs in BoxedKit —
-  keep it that way so it stays unit-testable.
-- The flow is two-stage: **Organize** tiles all windows on the active display with
-  the default layout for that count; then **Swap** (rotate window→slot) and
-  **Rebox** (cycle layout) let the user adjust. This is the `WindowManager`
-  "organize session." Don't auto-apply — it fires only on a click/shortcut.
+  decides which layouts each window count offers, their names, slot geometry,
+  weighted partitions for rigid windows, and feasibility (`fits`); `Layout.swift` is
+  the BSP fallback for 5+; `Reconcile.swift` is the cross-display move logic. No
+  AppKit/window APIs in BoxedKit — keep it that way so it stays unit-testable.
+- The flow: **Organize** tiles every window on the display under the cursor with
+  that count's default layout (the `WindowManager` "organize session"). A pill then
+  offers **Organize** (re-fill from scratch, clearing tweaks) and **Reformat**
+  (cycle to the next layout that *fits*); **drag a window onto another** swaps them,
+  **drag the handles** resize. Summoning when the display is already tiled just
+  reopens the pill — it never re-tiles on its own. Fires only on a click/shortcut.
+- **Rigid (min-size) windows** (e.g. Docker Desktop floors at ~940×600):
+  `WindowManager` probes each window's hard minimum once (a brief one-time resize),
+  then `Tiling` weights Columns/Rows/Grid so the rigid window keeps its footprint
+  and the rest stretch around it (`weightedLengths`), dividers clamp at its edge
+  (`fitRatio`), and Reformat skips layouts that can't fit it (`fits`). Resizable
+  windows always fill their slot; only non-resizable ones keep their size.
 - All window manipulation goes through the Accessibility API in `WindowManager`,
   which acts only on a user's click or shortcut — never on its own.
 - The pill (`SuggestionPanel`) is a non-activating `NSPanel` that lingers then
@@ -122,9 +131,13 @@ For the native app:
 - `Log.swift` writes to `/tmp/boxed.log`; use it to debug `open`-launched builds.
 - It's a menubar agent (`LSUIElement`, `.accessory` activation) — no dock icon,
   no main window. Keep it that way; "gets out of the way" still rules.
-- Build with `cd mac && ./scripts/make-app.sh`. Verify `swift build` compiles
-  before committing. Verify layout math with a standalone `swiftc` check (full
-  Xcode isn't installed, so `swift test`/XCTest won't run here).
+- Build with `cd mac && ./scripts/make-app.sh`; verify `swift build` compiles and
+  `./scripts/test.sh` is green before committing. AX/window behavior that isn't
+  unit-testable: verify live with the `live-demo` skill (`/tmp/boxed-cmd` hook +
+  `CGWindowList`).
+- **Large/multi-part features: write a short spec in `mac/docs/` first** (problem,
+  design, test plan) and confirm the approach before implementing — see
+  `docs/docker-desktop-gate.md`.
 
 ## Roadmap guardrails
 

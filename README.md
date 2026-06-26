@@ -33,20 +33,28 @@ Tile the windows on the display your cursor is on, three ways:
   the screen's a fullscreen app — nothing to tile).
 
 Layouts adapt to how many windows are open — 2 split it, 3 go main+stack, 4 make a
-quad, and 5+ tile automatically. A window that opens small (like Finder) keeps its
-size instead of stretching; big windows fill.
+quad, and 5+ tile automatically. Windows fill their slots.
+
+Some apps refuse to shrink past a minimum size (Docker Desktop, say). boxed
+measures that floor and **sizes the layout around it** — the fixed window keeps its
+footprint while the others stretch to fill what's left — and **skips any layout it
+genuinely can't fit** when you cycle (three wide windows that won't sit side by
+side, for instance).
 
 ## Tweak the layout
 
 Right after organizing, a small pill drops down under the `▣` while you fine-tune:
 
-- **Drag the handles** between windows to resize a split.
+- **Drag the handles** between windows to resize a split. A handle stops when the
+  window next to it can't shrink any further, instead of sliding it under.
 - **Drag the outer-edge handles** inward to shrink the whole layout and let some
   desktop show.
 - **Drag one window onto another** to swap their spots.
-- **▦ Rebox** — cycle to the next layout for that window count.
+- **⧉ Organize** — re-fill the screen from scratch, clearing any tweaks.
+- **▦ Reformat** — cycle to the next layout that fits this set of windows.
 
-Drag a window's edge to your preferred size once and boxed remembers it.
+Clicking **Organize tabs** again when everything's already tiled just reopens this
+pill — it won't shuffle your windows.
 
 ## Two displays
 
