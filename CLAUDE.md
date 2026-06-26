@@ -46,7 +46,7 @@ the user's tabs into a customizable, resizable grid. The guiding feeling is
 > ```
 > Tests passing is necessary but not sufficient: the suite only covers the pure
 > `BoxedKit` logic. If you touched window/AX behavior, ALSO re-verify the real
-> behavior via the `/tmp/boxed-cmd` hook + `CGWindowList` inspection (rebuild with
+> behavior via the `$TMPDIR/boxed-cmd` hook + `CGWindowList` inspection (rebuild with
 > `./scripts/make-app.sh` first) — and when a regression slips through, add a test
 > that would have caught it.
 
@@ -74,7 +74,7 @@ When fixing a bug or adding logic with a testable core, write the test FIRST:
 
 If the behavior is inherently AppKit / Accessibility / window-server (z-order,
 focus, real window placement) it can't be a pure unit test — verify it through the
-`/tmp/boxed-cmd` hook + `CGWindowList` inspection instead, and say so explicitly.
+`$TMPDIR/boxed-cmd` hook + `CGWindowList` inspection instead, and say so explicitly.
 
 ## Git workflow
 
@@ -129,12 +129,15 @@ For the native app:
 - **Tests:** `scripts/test.sh` runs the XCTest suite (it locates a full Xcode and
   sets `DEVELOPER_DIR`, since the Command Line Tools can't run `swift test`). Add a
   test in `Tests/BoxedKitTests` whenever you touch layout logic.
-- `Log.swift` writes to `/tmp/boxed.log`; use it to debug `open`-launched builds.
+- `Log.swift` writes to `$TMPDIR/boxed.log` (per-user, 0600 — not world-readable
+  /tmp). The `$TMPDIR/boxed-cmd` test hook is **off** unless launched with
+  `BOXED_CMD_HOOK=1` (`open --env BOXED_CMD_HOOK=1 boxed.app`); it's a dev affordance
+  (lets any local process drive boxed's AX-granted control), never a product feature.
 - It's a menubar agent (`LSUIElement`, `.accessory` activation) — no dock icon,
   no main window. Keep it that way; "gets out of the way" still rules.
 - Build with `cd mac && ./scripts/make-app.sh`; verify `swift build` compiles and
   `./scripts/test.sh` is green before committing. AX/window behavior that isn't
-  unit-testable: verify live with the `live-demo` skill (`/tmp/boxed-cmd` hook +
+  unit-testable: verify live with the `live-demo` skill (`$TMPDIR/boxed-cmd` hook +
   `CGWindowList`).
 - **Large/multi-part features: write a short spec in `mac/docs/` first** (problem,
   design, test plan) and confirm the approach before implementing — see

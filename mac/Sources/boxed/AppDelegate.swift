@@ -194,11 +194,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
   // MARK: - Test hook (dev only)
 
-  /// Polls /tmp/boxed-cmd so a script can drive boxed for automated testing:
-  ///   echo organize > /tmp/boxed-cmd   (also: rebox, swap, dismiss)
-  /// Lets changes be exercised against real windows without manual clicks.
+  /// Polls a command file so a script can drive boxed for automated testing:
+  ///   echo organize > "$TMPDIR/boxed-cmd"   (also: rebox, undo, dismiss, …)
+  ///
+  /// This is a TEST affordance, not a product feature — it lets any local process
+  /// drive boxed's Accessibility-granted window control. So it is OFF unless the
+  /// app is launched with BOXED_CMD_HOOK=1 (e.g. `open --env BOXED_CMD_HOOK=1
+  /// boxed.app`), and the channel lives in the per-user temp dir (0700, user-owned),
+  /// never world-writable /tmp.
   private func startCommandHook() {
-    let path = "/tmp/boxed-cmd"
+    guard ProcessInfo.processInfo.environment["BOXED_CMD_HOOK"] == "1" else { return }
+    let path = Paths.temp("boxed-cmd")
+    Log.write("command hook enabled (BOXED_CMD_HOOK=1) at \(path)")
     Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
       guard let self,
         let raw = try? String(contentsOfFile: path, encoding: .utf8)

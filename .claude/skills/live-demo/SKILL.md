@@ -1,6 +1,6 @@
 ---
 name: live-demo
-description: Drive and inspect the boxed macOS app live on this Mac for manual testing — build & relaunch it, send layout commands through the /tmp/boxed-cmd hook, warp the cursor to target a display, and read back real window geometry + logs. Use when verifying boxed's tiling, multi-display, edit-mode, or fullscreen behavior on the user's real screens (behavior the unit tests can't cover).
+description: Drive and inspect the boxed macOS app live on this Mac for manual testing — build & relaunch it, send layout commands through the $TMPDIR/boxed-cmd hook, warp the cursor to target a display, and read back real window geometry + logs. Use when verifying boxed's tiling, multi-display, edit-mode, or fullscreen behavior on the user's real screens (behavior the unit tests can't cover).
 ---
 
 # live-demo — drive & inspect boxed on this machine
@@ -34,19 +34,23 @@ SKILL=.claude/skills/live-demo/tools
 ```bash
 cd mac && swift build && ./scripts/test.sh        # must be green first
 ./scripts/make-app.sh                             # bundle (else you test a stale binary!)
-killall boxed 2>/dev/null; rm -f /tmp/boxed.log; open boxed.app
+killall boxed 2>/dev/null; rm -f $TMPDIR/boxed.log; open --env BOXED_CMD_HOOK=1 boxed.app
 osascript -e 'delay 1' >/dev/null                 # let it launch + grab Accessibility
 ```
 
-Confirm it's trusted: `grep accessibilityTrusted /tmp/boxed.log` → should say `true`.
+Confirm it's trusted: `grep accessibilityTrusted $TMPDIR/boxed.log` → should say `true`.
 (Re-grant Accessibility once if not; the stable signing keeps it across rebuilds.)
 
 ## 2. Drive it via the command hook
 
-The app polls `/tmp/boxed-cmd` (~0.3s). Send a command, then wait briefly:
+The command hook is a test-only affordance and is **off** unless the app was
+launched with `BOXED_CMD_HOOK=1` (the `open --env …` above) — a normal `open
+boxed.app` ignores it. The channel and log live in the per-user `$TMPDIR`, not the
+world-writable `/tmp`. The app polls `$TMPDIR/boxed-cmd` (~0.3s); send a command,
+then wait briefly:
 
 ```bash
-echo organize > /tmp/boxed-cmd; osascript -e 'delay 0.8' >/dev/null
+echo organize > $TMPDIR/boxed-cmd; osascript -e 'delay 0.8' >/dev/null
 ```
 
 Commands: `organize` (entry point: tile fresh if not yet tiled; if already tiled,
@@ -63,9 +67,9 @@ Events (top-left/AX coords) → **`reconcile`** (mouse-up). Without `seed` the w
 has no "previous display", so it won't auto-join — reconcile just drops it.
 
 ```bash
-echo seed > /tmp/boxed-cmd; osascript -e 'delay 0.4' >/dev/null    # mouse-down
+echo seed > $TMPDIR/boxed-cmd; osascript -e 'delay 0.4' >/dev/null    # mouse-down
 osascript -e 'tell application "System Events" to tell process "Google Chrome" to set position of front window to {2300, -300}'
-echo reconcile > /tmp/boxed-cmd; osascript -e 'delay 1.2' >/dev/null  # mouse-up
+echo reconcile > $TMPDIR/boxed-cmd; osascript -e 'delay 1.2' >/dev/null  # mouse-up
 ```
 
 **Gotcha — destination coords.** A window counts as "on" the display it overlaps
@@ -78,7 +82,7 @@ Place destination windows near the display's true top.
 
 ```bash
 /tmp/boxed-demo/screens                                  # find display frames
-/tmp/boxed-demo/warp 855 553;  echo organize > /tmp/boxed-cmd   # box display under (855,553)
+/tmp/boxed-demo/warp 855 553;  echo organize > $TMPDIR/boxed-cmd   # box display under (855,553)
 ```
 
 To simulate moving a window across displays, set its position with System Events
@@ -86,21 +90,21 @@ To simulate moving a window across displays, set its position with System Events
 
 ```bash
 osascript -e 'tell application "System Events" to tell process "Safari" to set position of front window to {150, 90}'
-echo reconcile > /tmp/boxed-cmd; osascript -e 'delay 0.8' >/dev/null
+echo reconcile > $TMPDIR/boxed-cmd; osascript -e 'delay 0.8' >/dev/null
 ```
 
 ## 3. Inspect
 
 ```bash
 /tmp/boxed-demo/winz            # where every window actually is
-tail -20 /tmp/boxed.log         # what boxed decided (applied layout, reconcile, etc.)
+tail -20 $TMPDIR/boxed.log         # what boxed decided (applied layout, reconcile, etc.)
 ```
 
 ## Tips & gotchas
 
 - **Always `make-app.sh` after `swift build`** or you relaunch the old binary
   (this has burned us — the giveaway is an old log format).
-- Clear the log (`rm -f /tmp/boxed.log`) before a scenario for clean output.
+- Clear the log (`rm -f $TMPDIR/boxed.log`) before a scenario for clean output.
 - `organize`/edit are greyed for <2 windows or a fullscreen Space (by design).
 - `winz` y-coords are top-left; `screens` are Cocoa (bottom-left) — don't mix them.
 - A 2nd-display window shows in `winz` at `x >= <display-1 width>`.

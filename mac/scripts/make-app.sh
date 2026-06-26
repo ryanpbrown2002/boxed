@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # Build boxed.app — a menubar agent bundle (LSUIElement, no dock icon).
+#
+# LOCAL DEVELOPMENT ONLY. Signs with the self-signed `boxed-dev` identity (see
+# setup-signing.sh). Distribution must use a real Developer ID + hardened runtime +
+# notarization, not this.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

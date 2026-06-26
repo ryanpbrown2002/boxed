@@ -6,6 +6,10 @@
 # Accessibility ONCE and it survives every future rebuild.
 #
 # Run this once. It's safe and reversible (security delete-keychain "$KEYCHAIN").
+#
+# LOCAL DEVELOPMENT ONLY. The keychain password is hardcoded, the key is importable
+# by any tool, and the cert is self-signed/untrusted by Gatekeeper — fine for a dev
+# box, NOT for distribution. Ship with a real Developer ID + notarization instead.
 set -euo pipefail
 
 IDENTITY="boxed-dev"

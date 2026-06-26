@@ -73,7 +73,7 @@ math: `fitRatio` (split a rigid window's min from the rest), `weightedLengths` /
 weighted Columns/Rows/Grid (stretch others around it), `fits` (skip impossible
 layouts), `clampOnscreen`, and `maxOverlapIndex` (which display a window is on).
 Window/AX behavior that can't be unit-tested is verified live via the `live-demo`
-skill (the `/tmp/boxed-cmd` hook + `CGWindowList`).
+skill (the `$TMPDIR/boxed-cmd` hook + `CGWindowList`).
 
 ## Code map
 
@@ -96,7 +96,7 @@ skill (the `/tmp/boxed-cmd` hook + `CGWindowList`).
 - [`AppDelegate.swift`](Sources/boxed/AppDelegate.swift) — menubar, permission
   prompt, shortcuts, the Organize → Organize/Reformat pill flow, drag-to-swap,
   cross-display reconcile monitor.
-- [`Log.swift`](Sources/boxed/Log.swift) — file logger at `/tmp/boxed.log`.
+- [`Log.swift`](Sources/boxed/Log.swift) — file logger at `$TMPDIR/boxed.log`.
 
 ## Known limitations / things to play with
 
@@ -106,5 +106,3 @@ skill (the `/tmp/boxed-cmd` hook + `CGWindowList`).
   (no auto-grow to fill the gap — by design).
 - 5+ windows use a generic BSP layout — hand-tuned layouts for higher counts are
   the obvious "we'll get there" follow-up.
-- The first organize of a window does a brief size flutter (probing its minimum);
-  it's cached afterward.
