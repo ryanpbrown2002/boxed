@@ -104,12 +104,13 @@ For the native app:
   weighted partitions for rigid windows, and feasibility (`fits`); `Layout.swift` is
   the BSP fallback for 5+; `Reconcile.swift` is the cross-display move logic. No
   AppKit/window APIs in BoxedKit — keep it that way so it stays unit-testable.
-- The flow: **Organize** tiles every window on the display under the cursor with
-  that count's default layout (the `WindowManager` "organize session"). A pill then
-  offers **Organize** (re-fill from scratch, clearing tweaks) and **Reformat**
-  (cycle to the next layout that *fits*); **drag a window onto another** swaps them,
-  **drag the handles** resize. Summoning when the display is already tiled just
-  reopens the pill — it never re-tiles on its own. Fires only on a click/shortcut.
+- The flow: **Organize windows** tiles every window on the display under the cursor
+  with that count's default layout (the `WindowManager` "organize session"). A pill
+  then offers **Reformat** (cycle to the next layout that *fits* — shown as a tiny
+  diagram of the current layout via `LayoutPreview`, not a name) and **↺ Reset**
+  (re-fill from scratch, clearing tweaks); **drag a window onto another** swaps them,
+  **drag the handles** resize. Summoning when already tiled re-snaps drifted windows
+  back into the layout (a tidy display isn't disturbed). Fires only on a click/shortcut.
 - **Rigid (min-size) windows** (e.g. Docker Desktop floors at ~940×600):
   `WindowManager` probes each window's hard minimum once (a brief one-time resize),
   then `Tiling` weights Columns/Rows/Grid so the rigid window keeps its footprint

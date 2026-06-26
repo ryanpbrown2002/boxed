@@ -28,9 +28,13 @@ Accessibility), relaunch, and you'll get a `▣` in your menubar.
 Tile the windows on the display your cursor is on, three ways:
 
 - **⌥⌘T** — organize now.
-- **⌥ (Option) + right-click anywhere** — pops a little Organize button at the cursor.
-- **Menubar `▣` → Organize tabs** (it's greyed out if there's only one window, or
+- **⌥ (Option) + right-click anywhere** — organizes the display under your cursor.
+- **Menubar `▣` → Organize windows** (greyed out if there's only one window, or
   the screen's a fullscreen app — nothing to tile).
+
+Summon it again when things are already tiled and it just re-snaps anything you've
+dragged out of place back into the layout (and reopens the tweak pill); a tidy
+display isn't disturbed.
 
 Layouts adapt to how many windows are open — 2 split it, 3 go main+stack, 4 make a
 quad, and 5+ tile automatically. Windows fill their slots.
@@ -50,11 +54,9 @@ Right after organizing, a small pill drops down under the `▣` while you fine-t
 - **Drag the outer-edge handles** inward to shrink the whole layout and let some
   desktop show.
 - **Drag one window onto another** to swap their spots.
-- **⧉ Organize** — re-fill the screen from scratch, clearing any tweaks.
-- **▦ Reformat** — cycle to the next layout that fits this set of windows.
-
-Clicking **Organize tabs** again when everything's already tiled just reopens this
-pill — it won't shuffle your windows.
+- **Reformat** — a little diagram of the current layout; click it to cycle to the
+  next layout that fits this set of windows (the diagram updates to match).
+- **↺ Reset** — re-fill the screen from scratch, clearing any tweaks.
 
 ## Two displays
 

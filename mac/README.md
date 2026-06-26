@@ -4,8 +4,9 @@ A menubar helper that stays out of your way. Summon it (shortcut, ⌥ right-clic
 the menubar `▣`) and every window on the display under your cursor snaps into a
 layout. A pill drops down under the `▣` (and fades on its own) to tweak the result:
 
-- **⧉ Organize** — re-fill the screen from scratch, clearing any tweaks.
-- **▦ Reformat** — cycle to the next layout that fits this set of windows.
+- **Reformat** — a tiny diagram of the current layout; click to cycle to the next
+  layout that fits (the diagram updates to match).
+- **↺ Reset** — re-fill the screen from scratch, clearing any tweaks.
 - **Drag one window onto another** to swap their spots; **drag the handles** to
   resize a split.
 
@@ -51,11 +52,11 @@ the Organize pill.
 
 ## Shortcuts & menubar
 
-- **⌥ (Option) + right-click anywhere** → Organize pill at your cursor.
+- **⌥ (Option) + right-click anywhere** → organize the display under the cursor.
 - **⌥⌘T** → organize immediately.
-- Menubar **`▣` → Organize tabs** (greyed out with fewer than two windows, or on a
-  fullscreen Space). If the display is already tiled, it just reopens the tweak
-  pill — it won't reshuffle.
+- Menubar **`▣` → Organize windows** (greyed out with fewer than two windows, or on
+  a fullscreen Space). If the display is already tiled, it re-snaps any drifted
+  windows and reopens the pill; a tidy display isn't reshuffled.
 
 ## Tests
 
@@ -86,7 +87,9 @@ skill (the `/tmp/boxed-cmd` hook + `CGWindowList`).
   size, weights the layout, clamps dividers); reconciles cross-display moves;
   applies frames.
 - [`SuggestionPanel.swift`](Sources/boxed/SuggestionPanel.swift) — the transient
-  pill (non-activating, lingers then fades; supports a title + keep-open buttons).
+  pill (non-activating, lingers then fades; supports text or image buttons).
+- [`LayoutPreview.swift`](Sources/boxed/LayoutPreview.swift) — draws the tiny layout
+  diagram on the Reformat button (paints `Tiling.slots`).
 - [`Splitter.swift`](Sources/boxed/Splitter.swift) — the draggable divider handles.
 - [`AppDelegate.swift`](Sources/boxed/AppDelegate.swift) — menubar, permission
   prompt, shortcuts, the Organize → Organize/Reformat pill flow, drag-to-swap,

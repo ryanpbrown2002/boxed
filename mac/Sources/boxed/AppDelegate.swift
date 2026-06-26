@@ -66,16 +66,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
   // MARK: - The organize flow
 
-  /// Stage 1: the "Organize tabs" prompt near a new window. Clicking it tiles
-  /// everything, then brings up the adjust pill.
-  private func showOrganizePill(near anchor: CGRect) {
-    let organize = WindowSuggestion(label: "⧉  Organize tabs") { [weak self] in
-      self?.organizeEntry()
-    }
-    Log.write("presenting organize pill near \(NSStringFromRect(anchor))")
-    suggestionPanel.present(title: nil, [organize], near: anchor)
-  }
-
   /// The single entry point (menu item, ⌥ right-click, ⌥⌘T). If the display under
   /// the cursor is already tiled, just open the adjust popup — don't move anything.
   /// Otherwise tile it fresh (needs ≥2 windows and not a fullscreen Space), then
@@ -91,24 +81,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     showAdjustPill(layoutName: name)
   }
 
-  /// Stage 2: a small pill that drops down under the menubar ▣ to tweak the
-  /// arrangement. Rebox cycles to the next layout; swapping is by dragging a
-  /// window onto another. Each press re-tiles and refreshes the pill (resets fade).
+  /// A small pill that drops down under the menubar ▣ to tweak the arrangement.
+  /// Reformat (shown as a diagram of the current layout) cycles to the next layout;
+  /// Reset re-fills from scratch; swapping is by dragging a window onto another.
+  /// Each press re-tiles and refreshes the pill (resets fade).
   private func showAdjustPill(layoutName: String) {
     manager.editMode = true
     beginDragSwap()
     positionSplitters()
-    // Organize = re-fill this display from scratch (reset ratios/insets/heights).
-    // Reformat = cycle to the next layout shape for this window count.
-    let organize = WindowSuggestion(label: "⧉ Organize", keepsPanelOpen: true) { [weak self] in
+    // Reset = re-fill this display from scratch (clears ratios/insets/heights) —
+    // named apart from the menubar's Organize so the two read distinctly.
+    let reset = WindowSuggestion(label: "↺ Reset", keepsPanelOpen: true) { [weak self] in
       guard let self else { return }
       self.showAdjustPill(layoutName: self.manager.reorganizeActive() ?? layoutName)
     }
-    let reformat = WindowSuggestion(label: "▦ Reformat", keepsPanelOpen: true) { [weak self] in
+    // Reformat = cycle the layout shape. The button is a tiny diagram of the
+    // *current* layout (updates each press) rather than a name.
+    let preview = LayoutPreview.image(for: manager.currentLayout(), size: NSSize(width: 38, height: 24))
+    let reformat = WindowSuggestion(label: "Reformat", image: preview, keepsPanelOpen: true) {
+      [weak self] in
       guard let self else { return }
       self.showAdjustPill(layoutName: self.manager.rebox() ?? layoutName)
     }
-    suggestionPanel.present(title: nil, [organize, reformat], near: menubarAnchor(), prominent: true)
+    suggestionPanel.present(title: nil, [reset, reformat], near: menubarAnchor(), prominent: true)
   }
 
   /// A point just under the boxed menubar icon, so the pill reads as belonging to
@@ -235,7 +230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     menu.autoenablesItems = false
 
     organizeItem = NSMenuItem(
-      title: "Organize tabs", action: #selector(organizeNow), keyEquivalent: "t")
+      title: "Organize windows", action: #selector(organizeNow), keyEquivalent: "t")
     organizeItem.keyEquivalentModifierMask = [.command, .option]
     organizeItem.target = self
     menu.addItem(organizeItem)
@@ -291,14 +286,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       }
     }
 
-    // ⌥ right-click anywhere — summon the organize pill at the cursor. Gated on
-    // the Option key so ordinary right-clicks / context menus are untouched.
+    // ⌥ right-click anywhere — organize the display under the cursor immediately
+    // (same as ⌥⌘T), then show the adjust pill. Gated on the Option key so ordinary
+    // right-clicks / context menus are untouched.
     rightClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: .rightMouseDown) {
       [weak self] event in
       let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
       guard mods.contains(.option) else { return }
-      let point = NSEvent.mouseLocation
-      self?.showOrganizePill(near: CGRect(x: point.x, y: point.y, width: 0, height: 0))
+      self?.organizeEntry()
     }
   }
 }

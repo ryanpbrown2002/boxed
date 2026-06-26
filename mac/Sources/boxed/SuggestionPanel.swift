@@ -5,11 +5,16 @@ import AppKit
 /// with refreshed content instead of dismissing.
 struct WindowSuggestion {
   let label: String
+  let image: NSImage?
   let keepsPanelOpen: Bool
   let apply: () -> Void
 
-  init(label: String, keepsPanelOpen: Bool = false, apply: @escaping () -> Void) {
+  init(
+    label: String, image: NSImage? = nil, keepsPanelOpen: Bool = false,
+    apply: @escaping () -> Void
+  ) {
     self.label = label
+    self.image = image
     self.keepsPanelOpen = keepsPanelOpen
     self.apply = apply
   }
@@ -161,6 +166,14 @@ final class SuggestionPanel: NSObject {
       button.bezelStyle = .rounded
       button.controlSize = controlSize
       button.font = .systemFont(ofSize: buttonSize, weight: .semibold)
+      if let image = suggestion.image {
+        // A layout diagram instead of a word: show the image, keep the label as
+        // the tooltip so it's still discoverable.
+        button.image = image
+        button.imageScaling = .scaleProportionallyUpOrDown
+        button.title = ""
+        button.toolTip = suggestion.label
+      }
       stack.addArrangedSubview(button)
     }
 

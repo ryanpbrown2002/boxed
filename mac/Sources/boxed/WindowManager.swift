@@ -618,6 +618,14 @@ final class WindowManager {
     return Tiling.name(kinds[s.layoutIndex % kinds.count], count: s.windows.count)
   }
 
+  /// The active display's current layout — for drawing the pill's layout diagram.
+  func currentLayout() -> (kind: LayoutKind, count: Int, ratio: CGFloat, stackRatio: CGFloat)? {
+    guard let s = session else { return nil }
+    let kinds = Tiling.layouts(for: s.windows.count)
+    guard !kinds.isEmpty else { return nil }
+    return (kinds[s.layoutIndex % kinds.count], s.windows.count, s.ratio, s.stackRatio)
+  }
+
   private func applySession() {
     if let s = session { applyLayout(s) }
   }
@@ -639,10 +647,6 @@ final class WindowManager {
     let kind = kinds[s.layoutIndex % kinds.count]
     let usable = usableRect(on: s.screen)
     let eff = effectiveRect(usable, s)
-    // Measure any unknown minimums up front (one-time flutter) so the weighted
-    // slots and feasibility checks are correct on this very first apply — no
-    // transient overlap before a window's floor is learned.
-    for w in s.windows { probeMin(w) }
     let rects = Tiling.slots(
       kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio,
       mins: slotMins(s))
@@ -960,23 +964,6 @@ final class WindowManager {
   /// The learned hard minimum, or .zero (unknown → treated as fully flexible).
   func minSize(of window: AXUIElement) -> CGSize {
     minSizes.first(where: { CFEqual($0.window, window) })?.size ?? .zero
-  }
-
-  /// Measure a window's hard minimum once: briefly shrink it to read the clamped
-  /// size, then restore (the next place() sizes it to its slot). This makes
-  /// weighted layouts and the feasibility check right on the first apply, so a
-  /// layout that can't fit a rigid window is skipped immediately rather than after
-  /// it's briefly shown. Cached per window — only the first organize flutters.
-  private func probeMin(_ window: AXUIElement) {
-    guard isSizeSettable(window),
-      !minSizes.contains(where: { CFEqual($0.window, window) }),
-      let original = frame(of: window)?.size
-    else { return }
-    setSize(window, CGSize(width: 1, height: 1))  // the app clamps to its true minimum
-    let measured = frame(of: window)?.size ?? original
-    setSize(window, original)  // restore; place() resizes to the slot next
-    minSizes.append((window, measured))
-    Log.write("probed min \(Int(measured.width))×\(Int(measured.height))")
   }
 
   /// A slot's window's learned min in one dimension (0 if unknown/out of range).
