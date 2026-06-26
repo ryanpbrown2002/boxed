@@ -189,6 +189,7 @@ final class WindowManager {
       Log.write("organize: no windows to tile")
       return nil
     }
+    captureUndo(onScreen)  // remember where they were, so Organize can be undone
     // Biggest windows take the primary slots (main), smaller ones the stack.
     let windows = onScreen.sorted { windowArea($0) > windowArea($1) }
     session = Session(
@@ -210,6 +211,7 @@ final class WindowManager {
     let onScreen = tileableWindows().filter { isOn($0, screen) }
     guard !onScreen.isEmpty, sameWindowSet(s.windows, onScreen) else { return nil }
     activeDisplay = id
+    captureUndo(s.windows)  // so a re-snap can be undone
     applyLayout(s)  // re-snap drifted windows; preserves order/ratios/insets
     return currentLayoutName()
   }
@@ -305,6 +307,8 @@ final class WindowManager {
     guard var s = session else { return nil }
     let kinds = Tiling.layouts(for: s.windows.count)
     guard !kinds.isEmpty else { return nil }
+    // Note: no captureUndo here — Reformat is reversible by cycling, and Undo
+    // should revert to before the organize, which the last capture already holds.
     let eff = effectiveRect(usableRect(on: s.screen), s)
     let mins = slotMins(s)
     var idx = s.layoutIndex
@@ -964,6 +968,35 @@ final class WindowManager {
   /// The learned hard minimum, or .zero (unknown → treated as fully flexible).
   func minSize(of window: AXUIElement) -> CGSize {
     minSizes.first(where: { CFEqual($0.window, window) })?.size ?? .zero
+  }
+
+  // MARK: - Undo
+
+  /// Window frames captured just before the last layout action, so it can be
+  /// undone. Single level — the escape hatch for "that's not what I wanted."
+  private var undoFrames: [(window: AXUIElement, frame: CGRect)] = []
+
+  private func captureUndo(_ windows: [AXUIElement]) {
+    undoFrames = windows.compactMap { w in frame(of: w).map { (w, $0) } }
+  }
+
+  func canUndo() -> Bool { !undoFrames.isEmpty }
+
+  /// Restore the frames captured before the last layout action and stop managing
+  /// this display (boxed forgets the tiling — a clean bail-out). Returns false if
+  /// there's nothing to undo.
+  @discardableResult
+  func undoLastLayout() -> Bool {
+    guard !undoFrames.isEmpty else { return false }
+    for (w, f) in undoFrames {
+      setPosition(w, f.origin)
+      if isSizeSettable(w) { setSize(w, f.size) }
+      setPosition(w, f.origin)  // re-anchor for apps that recenter on resize
+    }
+    Log.write("undo: restored \(undoFrames.count) window frame(s)")
+    undoFrames = []
+    if let id = activeDisplay { sessions[id] = nil }  // forget — next summon tiles fresh
+    return true
   }
 
   /// A slot's window's learned min in one dimension (0 if unknown/out of range).

@@ -7,6 +7,8 @@ layout. A pill drops down under the `▣` (and fades on its own) to tweak the re
 - **Reformat** — a tiny diagram of the current layout; click to cycle to the next
   layout that fits (the diagram updates to match).
 - **↺ Reset** — re-fill the screen from scratch, clearing any tweaks.
+- **↩ Undo** — restore every window to where it was before you organized (and boxed
+  stops managing the display). The escape hatch.
 - **Drag one window onto another** to swap their spots; **drag the handles** to
   resize a split.
 

@@ -103,7 +103,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       guard let self else { return }
       self.showAdjustPill(layoutName: self.manager.rebox() ?? layoutName)
     }
-    suggestionPanel.present(title: nil, [reset, reformat], near: menubarAnchor(), prominent: true)
+    var buttons = [reset, reformat]
+    // Undo = put the windows back where they were before this organize and stop
+    // managing the display — the escape hatch. Only offered when there's a snapshot.
+    if manager.canUndo() {
+      buttons.append(
+        WindowSuggestion(label: "↩ Undo") { [weak self] in self?.manager.undoLastLayout() })
+    }
+    suggestionPanel.present(title: nil, buttons, near: menubarAnchor(), prominent: true)
   }
 
   /// A point just under the boxed menubar icon, so the pill reads as belonging to
@@ -190,6 +197,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       case "organize": self.organizeEntry()
       case "reorganize":  // clean re-fill (reset ratios/insets), as the popup's Organize
         if let name = self.manager.reorganizeActive() { self.showAdjustPill(layoutName: name) }
+      case "undo": self.suggestionPanel.dismiss(); self.manager.undoLastLayout()
       case "rebox": if let name = self.manager.rebox() { self.showAdjustPill(layoutName: name) }
       case "swap": if let name = self.manager.swap() { self.showAdjustPill(layoutName: name) }
       case "drop": if let name = self.manager.handleWindowDropped() { self.showAdjustPill(layoutName: name) }

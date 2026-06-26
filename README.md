@@ -57,6 +57,8 @@ Right after organizing, a small pill drops down under the `▣` while you fine-t
 - **Reformat** — a little diagram of the current layout; click it to cycle to the
   next layout that fits this set of windows (the diagram updates to match).
 - **↺ Reset** — re-fill the screen from scratch, clearing any tweaks.
+- **↩ Undo** — changed your mind? Put every window back exactly where it was before
+  you organized, and boxed lets go.
 
 ## Two displays
 
