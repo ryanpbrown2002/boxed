@@ -21,6 +21,16 @@ final class TilingTests: XCTestCase {
     XCTAssertEqual(Tiling.fitRatio(total: 1000, min0: 980, min1: 50, fallback: 0.5), 1 - Tiling.minRatio, accuracy: 0.001)
   }
 
+  func testUndoShouldCapture() {
+    // First organize of a display (no session) → capture the pre-organize state.
+    XCTAssertTrue(Undo.shouldCapture(hasSession: false, sameWindowSet: false))
+    XCTAssertTrue(Undo.shouldCapture(hasSession: false, sameWindowSet: true))
+    // Re-snap / reformat / reset the SAME set → keep the original snapshot.
+    XCTAssertFalse(Undo.shouldCapture(hasSession: true, sameWindowSet: true))
+    // The set changed (window opened/closed) → it's a new arrangement → capture.
+    XCTAssertTrue(Undo.shouldCapture(hasSession: true, sameWindowSet: false))
+  }
+
   func testWeightedLengths() {
     // Nothing rigid → even split.
     XCTAssertEqual(Tiling.weightedLengths(mins: [0, 0, 0], total: 900), [300, 300, 300])

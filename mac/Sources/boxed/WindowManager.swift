@@ -183,13 +183,21 @@ final class WindowManager {
   /// any prior ratios/insets for that display.
   @discardableResult
   private func organizeFresh(on screen: NSScreen) -> String? {
-    activeDisplay = displayID(screen)
+    let id = displayID(screen)
+    activeDisplay = id
     let onScreen = tileableWindows().filter { isOn($0, screen) }
     guard !onScreen.isEmpty else {
       Log.write("organize: no windows to tile")
       return nil
     }
-    captureUndo(onScreen)  // remember where they were, so Organize can be undone
+    // Capture an undo point only for a genuinely new arrangement (no session yet,
+    // or a different set of windows) so re-organizing/resetting the same windows
+    // keeps the original pre-organize snapshot. (sessions[id] is still the OLD
+    // session here — the new one is built below.)
+    let sameSet = sessions[id].map { sameWindowSet($0.windows, onScreen) } ?? false
+    if Undo.shouldCapture(hasSession: sessions[id] != nil, sameWindowSet: sameSet) {
+      captureUndo(onScreen)
+    }
     // Biggest windows take the primary slots (main), smaller ones the stack.
     let windows = onScreen.sorted { windowArea($0) > windowArea($1) }
     session = Session(
@@ -211,7 +219,8 @@ final class WindowManager {
     let onScreen = tileableWindows().filter { isOn($0, screen) }
     guard !onScreen.isEmpty, sameWindowSet(s.windows, onScreen) else { return nil }
     activeDisplay = id
-    captureUndo(s.windows)  // so a re-snap can be undone
+    // Note: no captureUndo — re-snapping the same set must keep the original
+    // pre-organize snapshot so Undo still reverts all the way back.
     applyLayout(s)  // re-snap drifted windows; preserves order/ratios/insets
     return currentLayoutName()
   }
