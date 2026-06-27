@@ -14,6 +14,7 @@ APP="$ROOT/mac/boxed.app"
 WORK="${TMPDIR%/}/boxed-e2e"
 WINZ="$WORK/winz"
 WARP="$WORK/warp"
+SCREENS="$WORK/screens"
 LOG="${TMPDIR%/}/boxed.log"
 CMD="${TMPDIR%/}/boxed-cmd"
 
@@ -34,6 +35,8 @@ e2e_boot() {
     _red "failed to build winz"; exit 1; }
   [ -x "$WARP" ] || swiftc "$ROOT/.claude/skills/live-demo/tools/warp.swift" -o "$WARP" || {
     _red "failed to build warp"; exit 1; }
+  [ -x "$SCREENS" ] || swiftc "$ROOT/.claude/skills/live-demo/tools/screens.swift" -o "$SCREENS" || {
+    _red "failed to build screens"; exit 1; }
   ( cd "$ROOT/mac" && ./scripts/make-app.sh >/dev/null 2>&1 ) || { _red "build failed"; exit 1; }
   killall boxed 2>/dev/null; sleep 1
   rm -f "$LOG"
@@ -43,23 +46,38 @@ e2e_boot() {
 }
 
 HIDDEN_APPS=()
+_e2e_hide() {  # hide one process by name; remember it for restore; never aborts
+  local app="$1"; [ -n "$app" ] || return 0
+  case " ${HIDDEN_APPS[*]-} " in *" $app "*) ;; *) HIDDEN_APPS+=("$app") ;; esac
+  osascript -e "tell application \"System Events\" to set visible of process \"$app\" to false" >/dev/null 2>&1
+}
+
 e2e_hide_others() {
   # Hide every visible foreground app except TextEdit, so only our test windows are
-  # tileable. Record them (comma-separated) to restore later. (-e lines, not a
-  # heredoc — heredocs inside $() break macOS's bash 3.2.)
-  local names
+  # tileable. Two stages, because one un-hideable process used to abort the whole
+  # pass (leaving e.g. VS Code visible → boxed tiled it too):
+  #   1. collect the app names, then hide each INDEPENDENTLY (one failure can't kill
+  #      the rest). (-e lines, not a heredoc — heredocs inside $() break bash 3.2.)
+  #   2. sweep: whatever winz still shows that isn't TextEdit (Electron apps that
+  #      resisted, late-openers) gets hidden by name, until only TextEdit remains.
+  local names app left attempt
   names=$(osascript \
     -e 'tell application "System Events"' \
     -e 'set out to {}' \
     -e 'repeat with p in (every process whose background only is false and visible is true)' \
-    -e 'if name of p is not "TextEdit" then' \
-    -e 'set visible of p to false' \
-    -e 'set end of out to name of p' \
-    -e 'end if' \
+    -e 'if name of p is not "TextEdit" then set end of out to name of p' \
     -e 'end repeat' \
     -e 'return out' \
     -e 'end tell' 2>/dev/null)
-  IFS=',' read -ra HIDDEN_APPS <<<"$names"
+  local arr; IFS=',' read -ra arr <<<"$names"
+  for app in "${arr[@]:-}"; do _e2e_hide "${app# }"; done
+
+  for attempt in 1 2 3 4 5; do
+    left=$("$WINZ" | sed -nE 's/^.*\): (.+)  [0-9]+x[0-9]+ @.*/\1/p' | grep -v '^TextEdit$' | sort -u)
+    [ -z "$left" ] && break
+    while IFS= read -r app; do _e2e_hide "$app"; done <<<"$left"
+    osascript -e 'delay 0.4' >/dev/null
+  done
 }
 
 e2e_restore() {
@@ -76,6 +94,46 @@ trap e2e_restore EXIT
 
 # Warp the cursor onto the built-in display (display 1) so `organize` targets it.
 e2e_target() { "$WARP" 855 553 >/dev/null 2>&1; osascript -e 'delay 0.2' >/dev/null; }
+
+# ── multi-display ──────────────────────────────────────────────────────────
+# Display rects in CG global top-left coords (same space as winz/warp), as
+# "X Y W H". e2e_rect secondary is empty when only one display is connected.
+e2e_rect() { "$SCREENS" --cg | awk -v t="$1" '$3==t {print $4, $5, $6, $7; exit}'; }
+e2e_has_secondary() { [ -n "$(e2e_rect secondary)" ]; }
+
+# Center of a rect ("X Y W H") as "cx cy".
+e2e_center() { awk '{print $1+$3/2, $2+$4/2}' <<<"$1"; }
+
+# Warp the cursor onto the secondary display so `organize` targets it.
+e2e_target_secondary() {
+  local c; c=$(e2e_center "$(e2e_rect secondary)")
+  "$WARP" $c >/dev/null 2>&1; osascript -e 'delay 0.2' >/dev/null
+}
+
+# Move the first tiled TextEdit window whose top-left x >= 0 (i.e. on a display
+# right of the origin — the built-in here) to (x,y). Picks by position, not z-order,
+# so it's stable across organizes. Used to drag a window onto the other display.
+e2e_move_a_primary_window_to() {  # x y
+  osascript \
+    -e 'tell application "System Events" to tell process "TextEdit"' \
+    -e 'repeat with w in windows' \
+    -e 'set p to position of w' \
+    -e 'if (item 1 of p) >= 0 then' \
+    -e "set position of w to {$1, $2}" \
+    -e 'exit repeat' \
+    -e 'end if' \
+    -e 'end repeat' \
+    -e 'end tell' >/dev/null 2>&1
+  osascript -e 'delay 0.5' >/dev/null
+}
+
+# Count test windows whose CENTER falls inside a rect ("X Y W H").
+e2e_count_on() {  # X Y W H
+  e2e_frames | awk -v rx="$1" -v ry="$2" -v rw="$3" -v rh="$4" '
+    { cx=$3+$1/2; cy=$4+$2/2
+      if (cx>=rx && cx<rx+rw && cy>=ry && cy<ry+rh) n++ }
+    END { print n+0 }'
+}
 
 # Spawn N TextEdit documents, spread across the built-in display (display 1).
 e2e_spawn() {
@@ -134,6 +192,16 @@ assert_log() {  # assert_log "substring" "msg"  — searched since the last e2e_
     grep -vE "on-screen:|  keep |  drop |tileable windows:" "$LOG" 2>/dev/null | tail -4 | sed 's/^/      · /'
   fi
 }
+assert_count_on() {  # assert_count_on "X Y W H" N "msg"
+  local got; got=$(e2e_count_on $1)  # unquoted: split the rect into 4 args
+  if [ "${got:-0}" -eq "$2" ]; then ok "$3 ($got)"; else bad "$3 (want $2, got ${got:-0})"; fi
+}
+
+assert_log_count() {  # assert_log_count "substring" N "msg"
+  local got; got=$(grep -c "$1" "$LOG" 2>/dev/null)
+  if [ "${got:-0}" -eq "$2" ]; then ok "$3"; else bad "$3 (want $2× '$1', got ${got:-0})"; fi
+}
+
 e2e_clearlog() { rm -f "$LOG"; }
 
 summary() {

@@ -45,4 +45,34 @@ e2e_clearlog
 e2e_cmd restore 1.3
 assert_log "restored hidden windows; 3 tiled" "restore → 3 tiled"
 
+# 5 ─ Cross-display: drag a window from one boxed display onto another → it joins
+# that display's layout (Reconcile). Skipped when only one display is connected.
+scenario "drag a window across displays → it joins the other layout"
+if ! e2e_has_secondary; then
+  printf '  (skipped — only one display connected)\n'
+else
+  PRIMARY="$(e2e_rect primary)"
+  SECONDARY="$(e2e_rect secondary)"
+  # 5 fresh docs, parked 3 on the built-in and 2 on the secondary so BOTH displays
+  # have enough to box (organize is a no-op on a display with <2 windows).
+  e2e_spawn 5
+  e2e_move_a_primary_window_to -1000 -300
+  e2e_move_a_primary_window_to -1550 -300
+  e2e_target;           e2e_cmd organize 1.4   # box the built-in (3 windows)
+  e2e_target_secondary; e2e_cmd organize 1.4   # box the secondary (2 windows)
+  assert_count_on "$PRIMARY"   3 "built-in boxed with 3"
+  assert_count_on "$SECONDARY" 2 "secondary boxed with 2"
+
+  # Snapshot (mouse-down), drag a built-in window onto the secondary, reconcile
+  # (mouse-up): the window leaves the built-in (3→2) and joins the secondary (2→3).
+  e2e_cmd seed 0.6
+  e2e_move_a_primary_window_to -1200 -400
+  e2e_clearlog
+  e2e_cmd reconcile 1.4
+  assert_count_on "$PRIMARY"   2 "built-in re-tiled to 2 after the drag-out"
+  assert_count_on "$SECONDARY" 3 "secondary picked up the dragged window"
+  assert_no_overlap "the dragged window joined the layout (nothing floats/overlaps)"
+  assert_log_count "reconcile: display" 2 "reconcile re-tiled both displays"
+fi
+
 summary
