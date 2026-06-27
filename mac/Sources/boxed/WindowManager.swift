@@ -132,7 +132,13 @@ final class WindowManager {
         changed = true
       }
     }
-    if changed { Log.write("pruned closed window(s); not reflowing (no fullscreen)") }
+    guard changed else { return }
+    Log.write("pruned closed window(s)")
+    // While editing, re-tile so the layout closes the gap and the handles + pill
+    // match the remaining windows — otherwise the old layout's draggers persist.
+    // Outside edit mode, leave survivors as they are (closing shouldn't reshuffle a
+    // settled display).
+    if editMode, !draggingSplitter { scheduleReflow() }
   }
 
   /// Re-capture the windows on the active display and re-apply, coalescing bursts
