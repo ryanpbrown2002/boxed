@@ -216,6 +216,14 @@ public enum Tiling {
     return CGRect(x: slot.maxX - w, y: slot.minY, width: w, height: h)
   }
 
+  /// A rect of `size` centered in `rect` — used to park a hidden window in the
+  /// middle of the display, behind the tiled ones.
+  public static func centered(_ size: CGSize, in rect: CGRect) -> CGRect {
+    CGRect(
+      x: rect.midX - size.width / 2, y: rect.midY - size.height / 2,
+      width: size.width, height: size.height)
+  }
+
   /// Smallest fraction either side of an adjustable split may shrink to.
   public static let minRatio: CGFloat = 0.1
 

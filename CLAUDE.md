@@ -82,8 +82,11 @@ specs there (e.g. `docs/docker-desktop-gate.md`).
   then offers **Reformat** (cycle to the next layout that *fits* — shown as a tiny
   diagram of the current layout via `LayoutPreview`, not a name), **↺ Reset** (re-fill
   from scratch, clearing tweaks), and **↩ Undo** (restore the pre-organize state).
-  **Drag a window onto another** swaps them; **drag the handles** resize. Summoning
-  when already tiled re-snaps drifted windows (a tidy display isn't disturbed).
+  **Drag a window onto another** swaps them; **drag the handles** resize. Each window
+  gets a small **"hide"** button (top-right, `HideButton`) that pulls it out of the
+  layout — parked centered behind the rest, tracked in the session's `hidden` list so
+  re-editing keeps it hidden (Reset brings them back). Summoning when already tiled
+  re-snaps drifted windows (a tidy display isn't disturbed).
 - **Rigid (min-size) windows** (e.g. Docker Desktop floors at ~940×600):
   `WindowManager` learns each window's minimum as a side effect of tiling, then
   `Tiling` weights Columns/Rows/Grid so the rigid window keeps its footprint and the

@@ -211,6 +211,17 @@ final class TilingTests: XCTestCase {
     XCTAssertEqual(even[1].height, 300, accuracy: 0.001)
   }
 
+  func testCentered() {
+    let r = CGRect(x: 0, y: 0, width: 1000, height: 600)
+    XCTAssertEqual(
+      Tiling.centered(CGSize(width: 400, height: 200), in: r),
+      CGRect(x: 300, y: 200, width: 400, height: 200))
+    // Offset origin is respected.
+    XCTAssertEqual(
+      Tiling.centered(CGSize(width: 100, height: 100), in: CGRect(x: 200, y: 50, width: 400, height: 400)),
+      CGRect(x: 350, y: 200, width: 100, height: 100))
+  }
+
   func testClampRatio() {
     XCTAssertEqual(Tiling.clampRatio(0.5), 0.5, accuracy: 0.001)
     XCTAssertEqual(Tiling.clampRatio(0.001), Tiling.minRatio, accuracy: 0.001)  // floored

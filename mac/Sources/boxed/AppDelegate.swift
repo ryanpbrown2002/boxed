@@ -28,6 +28,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     return splitter
   }
 
+  /// A "hide" button overlaid on each tiled window's top-right corner while editing.
+  private lazy var hideButtons: [HideButton] = (0..<16).map { _ in HideButton() }
+
   func applicationDidFinishLaunching(_ notification: Notification) {
     Log.write("launched. accessibilityTrusted=\(AXIsProcessTrusted())")
     setupMenu()
@@ -38,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       self?.manager.editMode = false
       self?.endDragSwap()
       self?.splitters.forEach { $0.hide() }
+      self?.hideButtons.forEach { $0.hide() }
     }
     // When a window opens/closes during edit mode, re-tile and refresh the pill.
     manager.onReorganized = { [weak self] name in self?.showAdjustPill(layoutName: name) }
@@ -104,6 +108,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       self.showAdjustPill(layoutName: self.manager.rebox() ?? layoutName)
     }
     var buttons = [reset, reformat]
+    // Hiding is done from the little "hide" button on each window (see
+    // positionHideButtons); ↺ Reset brings any hidden windows back.
     // Undo = put the windows back where they were before this organize and stop
     // managing the display — the escape hatch. Only offered when there's a snapshot.
     if manager.canUndo() {
@@ -150,6 +156,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       } else {
         splitter.hide()
       }
+    }
+    positionHideButtons()
+  }
+
+  /// Place a "hide" button in the top-right corner of each tiled window.
+  private func positionHideButtons() {
+    if manager.isFullscreenContext() {
+      hideButtons.forEach { $0.hide() }
+      return
+    }
+    let slots = manager.tiledSlots()
+    let bw: CGFloat = 46
+    let bh: CGFloat = 20
+    let pad: CGFloat = 8
+    for (index, button) in hideButtons.enumerated() {
+      guard index < slots.count else {
+        button.hide()
+        continue
+      }
+      let (window, rect) = slots[index]
+      // Top-right corner (Cocoa: maxY is the top edge), clear of the traffic lights.
+      let frame = CGRect(x: rect.maxX - bw - pad, y: rect.maxY - bh - pad, width: bw, height: bh)
+      button.onClick = { [weak self] in
+        guard let self else { return }
+        self.showAdjustPill(layoutName: self.manager.hide(window) ?? "")
+      }
+      button.show(frame: frame)
     }
   }
 
@@ -219,6 +252,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
       case "reorganize":  // clean re-fill (reset ratios/insets), as the popup's Organize
         if let name = self.manager.reorganizeActive() { self.showAdjustPill(layoutName: name) }
       case "undo": self.suggestionPanel.dismiss(); self.manager.undoLastLayout()
+      case "hide": if let name = self.manager.hideFocusedWindow() { self.showAdjustPill(layoutName: name) }
       case "rebox": if let name = self.manager.rebox() { self.showAdjustPill(layoutName: name) }
       case "swap": if let name = self.manager.swap() { self.showAdjustPill(layoutName: name) }
       case "drop": if let name = self.manager.handleWindowDropped() { self.showAdjustPill(layoutName: name) }

@@ -52,6 +52,9 @@ final class WindowManager {
     // Per-slot height trim (points off the top/bottom of each window's slot), so a
     // single window's height can be adjusted independently. Index = slot.
     var vInsets: [(top: CGFloat, bottom: CGFloat)] = []
+    // Windows pulled out of the layout (parked centered, behind the tiled ones).
+    // Tracked here so re-editing keeps them hidden; Reset/fresh-organize restores them.
+    var hidden: [AXUIElement] = []
   }
   /// One layout per display ("boxed" displays). Keyed by display ID.
   private var sessions: [CGDirectDisplayID: Session] = [:]
@@ -121,9 +124,10 @@ final class WindowManager {
   func handleWindowClosed() {
     var changed = false
     for (id, var s) in sessions {
-      let before = s.windows.count
+      let before = s.windows.count + s.hidden.count
       s.windows.removeAll { frame(of: $0) == nil }  // closed → AX frame unreadable
-      if s.windows.count != before {
+      s.hidden.removeAll { frame(of: $0) == nil }  // a hidden window can be closed too
+      if s.windows.count + s.hidden.count != before {
         sessions[id] = s.windows.isEmpty ? nil : normalized(s)
         changed = true
       }
@@ -150,20 +154,23 @@ final class WindowManager {
     // off-screen by Show Desktop / a Spaces transition is still alive — it must
     // not be dropped just because it isn't in the on-screen scan this instant.
     let alive = old.windows.filter { isTileable($0) && frame(of: $0) != nil }
-    // Add genuinely new on-screen windows we aren't tracking yet.
+    // Add genuinely new on-screen windows we aren't tracking yet — but not the
+    // hidden ones (they're parked on screen, yet must stay out of the layout).
     let newcomers = tileableWindows().filter { candidate in
       isOn(candidate, screen) && !alive.contains { CFEqual($0, candidate) }
+        && !old.hidden.contains { CFEqual($0, candidate) }
     }
     // Keep existing windows in their order; new ones go to the trailing slots.
     let windows = alive + newcomers
     guard !windows.isEmpty else { return }
     let keepLayout = windows.count == old.windows.count
-    let next = Session(
+    var next = Session(
       windows: windows, screen: screen, layoutIndex: keepLayout ? old.layoutIndex : 0,
       order: Array(0..<windows.count), ratio: keepLayout ? old.ratio : 0.5,
       stackRatio: keepLayout ? old.stackRatio : 0.5,
       insetTop: keepLayout ? old.insetTop : 0, insetBottom: keepLayout ? old.insetBottom : 0,
       insetLeft: keepLayout ? old.insetLeft : 0, insetRight: keepLayout ? old.insetRight : 0)
+    next.hidden = old.hidden.filter { frame(of: $0) != nil }  // keep hidden across reflow
 
     // "Reveal desktop"/Show Desktop parks the managed windows off-screen and ignores
     // setPosition until they're restored — so a new window would tile alone. Detect
@@ -258,11 +265,13 @@ final class WindowManager {
     let id = displayID(screen)
     guard let s = sessions[id] else { return nil }
     let onScreen = tileableWindows().filter { isOn($0, screen) }
-    guard !onScreen.isEmpty, sameWindowSet(s.windows, onScreen) else { return nil }
+    // Compare against tiled + hidden: a hidden window is still on screen (parked
+    // centered), so the set is "already organized" and re-editing keeps it hidden.
+    guard !onScreen.isEmpty, sameWindowSet(s.windows + s.hidden, onScreen) else { return nil }
     activeDisplay = id
     // Note: no captureUndo — re-snapping the same set must keep the original
     // pre-organize snapshot so Undo still reverts all the way back.
-    applyLayout(s)  // re-snap drifted windows; preserves order/ratios/insets
+    applyLayout(s)  // re-snap drifted windows (and re-park hidden ones)
     return currentLayoutName()
   }
 
@@ -319,6 +328,73 @@ final class WindowManager {
     s.vInsets[slot] = (top: max(0, top), bottom: max(0, bottom))
     session = s
     applySession()
+  }
+
+  // MARK: - Hide / un-hide
+
+  /// Pull a specific window out of the layout: park it centered behind the others
+  /// and re-tile the rest. Tracked in the session's `hidden` list so re-editing
+  /// keeps it hidden (Reset / fresh organize brings it back). Won't hide the last
+  /// tiled window. Driven by the per-window "hide" button.
+  @discardableResult
+  func hide(_ window: AXUIElement) -> String? {
+    guard var s = session, s.windows.count > 1,
+      let idx = s.windows.firstIndex(where: { CFEqual($0, window) })
+    else { return currentLayoutName() }
+    s.windows.remove(at: idx)
+    s.hidden.append(window)
+    session = normalized(s)
+    // Send the hidden window behind the tiled ones. Activate a tiled window's app
+    // *first* (drops the hidden window's now-inactive app behind), THEN tile —
+    // parkHidden raises the tiled windows above it. Same-app z-order is handled by
+    // that raise.
+    let hiddenPid = pid(of: window)
+    if let other = s.windows.compactMap({ pid(of: $0) }).first(where: { $0 != hiddenPid }) {
+      NSRunningApplication(processIdentifier: other)?.activate()
+    }
+    applyAndFitActive()
+    Log.write("hid window; \(s.windows.count) tiled, \(s.hidden.count) hidden")
+    return currentLayoutName()
+  }
+
+  /// Hide whatever window is focused (used by the test hook).
+  @discardableResult
+  func hideFocusedWindow() -> String? {
+    guard let target = focusedWindow() else { return currentLayoutName() }
+    return hide(target)
+  }
+
+  /// Each tiled window with its slot rect in Cocoa coords — for positioning the
+  /// per-window "hide" buttons (top-right corner of each).
+  func tiledSlots() -> [(window: AXUIElement, frame: CGRect)] {
+    guard let s = session else { return [] }
+    let count = s.windows.count
+    let kinds = Tiling.layouts(for: count)
+    guard !kinds.isEmpty else { return [] }
+    let kind = kinds[s.layoutIndex % kinds.count]
+    let eff = effectiveRect(usableRect(on: s.screen), s)
+    let rects = Tiling.slots(
+      kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio,
+      mins: slotMins(s))
+    var out: [(AXUIElement, CGRect)] = []
+    for slot in 0..<min(count, rects.count) where slot < s.order.count {
+      let vi = slot < s.vInsets.count ? s.vInsets[slot] : (top: CGFloat(0), bottom: CGFloat(0))
+      let r = Tiling.shrinkVertically(rects[slot], top: vi.top, bottom: vi.bottom)
+      out.append((s.windows[s.order[slot]], axToCocoa(r)))
+    }
+    return out
+  }
+
+  /// The window the user currently has focused (what Hide acts on).
+  private func focusedWindow() -> AXUIElement? {
+    guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+    var w: CFTypeRef?
+    guard
+      AXUIElementCopyAttributeValue(
+        AXUIElementCreateApplication(app.processIdentifier), kAXFocusedWindowAttribute as CFString,
+        &w) == .success, let win = w, CFGetTypeID(win) == AXUIElementGetTypeID()
+    else { return nil }
+    return (win as! AXUIElement)
   }
 
   /// Debug/test hook: set the split ratios directly (clamped to rigid mins, same
@@ -709,7 +785,19 @@ final class WindowManager {
       let r = Tiling.shrinkVertically(rects[slot], top: vi.top, bottom: vi.bottom)
       place(s.windows[s.order[slot]], in: r, within: usable)
     }
+    parkHidden(s, in: usable)
     Log.write("applied \(Tiling.name(kind, count: count)) (count=\(count)) on display \(displayID(s.screen))")
+  }
+
+  /// Park hidden windows centered on the display, behind the tiled ones. AX has no
+  /// "send to back", so we raise the tiled windows so they sit in front.
+  private func parkHidden(_ s: Session, in usable: CGRect) {
+    guard !s.hidden.isEmpty else { return }
+    for w in s.hidden {
+      guard let f = frame(of: w) else { continue }
+      setPosition(w, Tiling.centered(f.size, in: usable).origin)
+    }
+    for w in s.windows { AXUIElementPerformAction(w, kAXRaiseAction as CFString) }
   }
 
   /// After a layout is applied, some windows may have a minimum size larger than
