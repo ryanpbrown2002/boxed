@@ -57,6 +57,8 @@ Commands: `organize` (entry point: tile fresh if not yet tiled; if already tiled
 just opens the adjust popup and moves nothing), `reorganize` (the popup's Organize
 — a clean re-fill that resets ratios/insets/heights), `rebox` (the popup's Reformat
 — cycle layout), `undo` (restore pre-organize frames + forget the session),
+`hide` (pull the focused window out of the layout, parked centered behind),
+`restore` (bring all hidden windows back, keeping tweaks),
 `swap`, `drop`, `seed`, `reconcile`, `dismiss`,
 `dividers` (logs the handle list), `ratio <0..1>`, `stack <0..1>`,
 `inset <top|bottom|left|right> <pts>`, `vinset <slot> <topPts> <bottomPts>`.

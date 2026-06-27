@@ -85,8 +85,10 @@ specs there (e.g. `docs/docker-desktop-gate.md`).
   **Drag a window onto another** swaps them; **drag the handles** resize. Each window
   gets a small **"hide"** button (top-right, `HideButton`) that pulls it out of the
   layout — parked centered behind the rest, tracked in the session's `hidden` list so
-  re-editing keeps it hidden (Reset brings them back). Summoning when already tiled
-  re-snaps drifted windows (a tidy display isn't disturbed).
+  re-editing keeps it hidden. When any are hidden the pill shows **show N hidden**
+  (`restoreHidden` — brings them all back, keeping tweaks); Reset also restores but
+  re-fills fresh. Summoning when already tiled re-snaps drifted windows (a tidy
+  display isn't disturbed).
 - **Rigid (min-size) windows** (e.g. Docker Desktop floors at ~940×600):
   `WindowManager` learns each window's minimum as a side effect of tiling, then
   `Tiling` weights Columns/Rows/Grid so the rigid window keeps its footprint and the

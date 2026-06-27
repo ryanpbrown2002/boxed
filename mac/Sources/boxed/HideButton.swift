@@ -29,9 +29,15 @@ final class HideButtonView: NSView {
   override func draw(_ dirtyRect: NSRect) {
     let r = bounds.insetBy(dx: 1, dy: 1)
     let pill = NSBezierPath(roundedRect: r, xRadius: r.height / 2, yRadius: r.height / 2)
-    // A dark frosted capsule that lights up blue on hover, so it reads on any window.
-    (hovered ? Self.accent : NSColor(white: 0, alpha: 0.62)).setFill()
+    // A dark capsule that lights up blue on hover, so it reads on any window. At rest
+    // a faint hairline keeps it legible on dark windows (where the fill blends in).
+    (hovered ? Self.accent : NSColor(white: 0, alpha: 0.58)).setFill()
     pill.fill()
+    if !hovered {
+      NSColor(white: 1, alpha: 0.22).setStroke()
+      pill.lineWidth = 1
+      pill.stroke()
+    }
 
     let text = "hide" as NSString
     let attrs: [NSAttributedString.Key: Any] = [

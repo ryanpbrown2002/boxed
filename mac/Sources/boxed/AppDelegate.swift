@@ -109,7 +109,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     var buttons = [reset, reformat]
     // Hiding is done from the little "hide" button on each window (see
-    // positionHideButtons); ↺ Reset brings any hidden windows back.
+    // positionHideButtons). When some are set aside, one compact "show N hidden"
+    // button brings them ALL back, keeping the current tweaks (Reset re-fills fresh).
+    // It doubles as the "you have hidden windows" indicator.
+    let n = manager.hiddenCount()
+    if n > 0 {
+      buttons.append(
+        WindowSuggestion(label: "show \(n) hidden", keepsPanelOpen: true) { [weak self] in
+          guard let self else { return }
+          self.showAdjustPill(layoutName: self.manager.restoreHidden() ?? layoutName)
+        })
+    }
     // Undo = put the windows back where they were before this organize and stop
     // managing the display — the escape hatch. Only offered when there's a snapshot.
     if manager.canUndo() {
@@ -253,6 +263,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let name = self.manager.reorganizeActive() { self.showAdjustPill(layoutName: name) }
       case "undo": self.suggestionPanel.dismiss(); self.manager.undoLastLayout()
       case "hide": if let name = self.manager.hideFocusedWindow() { self.showAdjustPill(layoutName: name) }
+      case "restore": if let name = self.manager.restoreHidden() { self.showAdjustPill(layoutName: name) }
       case "rebox": if let name = self.manager.rebox() { self.showAdjustPill(layoutName: name) }
       case "swap": if let name = self.manager.swap() { self.showAdjustPill(layoutName: name) }
       case "drop": if let name = self.manager.handleWindowDropped() { self.showAdjustPill(layoutName: name) }

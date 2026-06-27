@@ -385,6 +385,22 @@ final class WindowManager {
     return out
   }
 
+  /// How many windows are set aside on the active display (for the pill indicator).
+  func hiddenCount() -> Int { session?.hidden.count ?? 0 }
+
+  /// Bring every hidden window back into the layout, keeping the current ratios and
+  /// insets (unlike Reset, which re-fills from scratch). Non-destructive un-hide.
+  @discardableResult
+  func restoreHidden() -> String? {
+    guard var s = session, !s.hidden.isEmpty else { return currentLayoutName() }
+    s.windows.append(contentsOf: s.hidden)
+    s.hidden = []
+    session = normalized(s)
+    applyAndFitActive()
+    Log.write("restored hidden windows; \(s.windows.count) tiled")
+    return currentLayoutName()
+  }
+
   /// The window the user currently has focused (what Hide acts on).
   private func focusedWindow() -> AXUIElement? {
     guard let app = NSWorkspace.shared.frontmostApplication else { return nil }

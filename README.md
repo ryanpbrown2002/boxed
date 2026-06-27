@@ -56,7 +56,9 @@ Right after organizing, a small pill drops down under the `▣` while you fine-t
 - **Drag one window onto another** to swap their spots.
 - **hide** (the little button at each window's top-right) — pull that window out of
   the layout; it parks centered behind the others and the rest re-fill. It stays
-  hidden when you re-organize; **↺ Reset** brings it back.
+  hidden when you re-organize. When anything's hidden the pill shows **show N
+  hidden** — click to bring them all back *keeping your tweaks* (**↺ Reset** also
+  restores them, but re-fills from scratch).
 - **Reformat** — a little diagram of the current layout; click it to cycle to the
   next layout that fits this set of windows (the diagram updates to match).
 - **↺ Reset** — re-fill the screen from scratch, clearing any tweaks.
