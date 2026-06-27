@@ -43,6 +43,8 @@ final class WindowManager {
     var order: [Int]  // order[slot] = index into `windows`
     var ratio: CGFloat = 0.5  // primary split fraction (the draggable edge)
     var stackRatio: CGFloat = 0.5  // secondary split (between the two stacked windows)
+    var gridX: CGFloat = 0.5  // 2×2 grid: column split (left/right)
+    var gridY: CGFloat = 0.5  // 2×2 grid: row split (top/bottom)
     // Outer margins (points) — drag the edge handles to inset the tiled region and
     // let the desktop show around it.
     var insetTop: CGFloat = 0
@@ -381,7 +383,7 @@ final class WindowManager {
     let eff = effectiveRect(usableRect(on: s.screen), s)
     let rects = Tiling.slots(
       kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio,
-      mins: slotMins(s))
+      mins: slotMins(s), gridX: s.gridX, gridY: s.gridY)
     var out: [(AXUIElement, CGRect)] = []
     for slot in 0..<min(count, rects.count) where slot < s.order.count {
       let vi = slot < s.vInsets.count ? s.vInsets[slot] : (top: CGFloat(0), bottom: CGFloat(0))
@@ -512,7 +514,7 @@ final class WindowManager {
     let kind = kinds[s.layoutIndex % kinds.count]
     let rects = Tiling.slots(
       kind, count: count, in: effectiveRect(usableRect(on: s.screen), s), gap: gap, ratio: s.ratio,
-      stackRatio: s.stackRatio, mins: slotMins(s))
+      stackRatio: s.stackRatio, mins: slotMins(s), gridX: s.gridX, gridY: s.gridY)
     guard rects.count == count else { return nil }
 
     let centers = (0..<count).map { slot in
@@ -581,6 +583,7 @@ final class WindowManager {
   struct Divider {
     enum Kind {
       case primary, stack, edgeLeft, edgeRight
+      case gridColumn, gridRow  // the 2×2 grid's column / row split
       case windowTop(Int), windowBottom(Int)  // per-window height handles (slot index)
     }
     let kind: Kind
@@ -605,7 +608,24 @@ final class WindowManager {
     var out: [Divider] = []
 
     // Internal split(s), within the inset region.
-    if let primaryVertical = primarySplitVertical(kind, count) {
+    if kind == .grid, count == 4 {
+      // 2×2 grid: a full-height column handle and a full-width row handle (its cross).
+      let (colMin, rowMin) = gridMins(s)
+      let xr = Tiling.fitRatio(total: eff.width, min0: colMin[0], min1: colMin[1], fallback: s.gridX)
+      let yr = Tiling.fitRatio(total: eff.height, min0: rowMin[0], min1: rowMin[1], fallback: s.gridY)
+      let cx = eff.minX + eff.width * xr
+      let cy = eff.minY + eff.height * yr
+      out.append(
+        Divider(
+          kind: .gridColumn,
+          frame: axToCocoa(CGRect(x: cx - grab / 2, y: eff.minY, width: grab, height: eff.height)),
+          vertical: true))
+      out.append(
+        Divider(
+          kind: .gridRow,
+          frame: axToCocoa(CGRect(x: eff.minX, y: cy - grab / 2, width: eff.width, height: grab)),
+          vertical: false))
+    } else if let primaryVertical = primarySplitVertical(kind, count) {
       let primaryAX: CGRect
       if primaryVertical {
         let x = eff.minX + eff.width * s.ratio
@@ -661,29 +681,45 @@ final class WindowManager {
     // Per-window height handles — only on a window's FREE outer edges (those at
     // the layout's top/bottom). An inner edge shared with a neighbor is owned by
     // the split divider, so we don't stack a handle there (that was moving both).
-    let raw = Tiling.slots(
-      kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio,
-      mins: slotMins(s))
-    for slot in 0..<min(count, raw.count) {
-      let vi = slot < s.vInsets.count ? s.vInsets[slot] : (top: CGFloat(0), bottom: CGFloat(0))
-      let f = Tiling.shrinkVertically(raw[slot], top: vi.top, bottom: vi.bottom)
-      let edges = Tiling.touchesEdge(slot: raw[slot], layout: eff, gap: gap)
-      if edges.top {
-        out.append(
-          Divider(
-            kind: .windowTop(slot),
-            frame: axToCocoa(CGRect(x: f.minX, y: f.minY - grab / 2, width: f.width, height: grab)),
-            vertical: false))
-      }
-      if edges.bottom {
-        out.append(
-          Divider(
-            kind: .windowBottom(slot),
-            frame: axToCocoa(CGRect(x: f.minX, y: f.maxY - grab / 2, width: f.width, height: grab)),
-            vertical: false))
+    // Grid is excluded: its gridRow handle resizes the rows instead.
+    if kind != .grid {
+      let raw = Tiling.slots(
+        kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio,
+        mins: slotMins(s), gridX: s.gridX, gridY: s.gridY)
+      for slot in 0..<min(count, raw.count) {
+        let vi = slot < s.vInsets.count ? s.vInsets[slot] : (top: CGFloat(0), bottom: CGFloat(0))
+        let f = Tiling.shrinkVertically(raw[slot], top: vi.top, bottom: vi.bottom)
+        let edges = Tiling.touchesEdge(slot: raw[slot], layout: eff, gap: gap)
+        if edges.top {
+          out.append(
+            Divider(
+              kind: .windowTop(slot),
+              frame: axToCocoa(CGRect(x: f.minX, y: f.minY - grab / 2, width: f.width, height: grab)),
+              vertical: false))
+        }
+        if edges.bottom {
+          out.append(
+            Divider(
+              kind: .windowBottom(slot),
+              frame: axToCocoa(CGRect(x: f.minX, y: f.maxY - grab / 2, width: f.width, height: grab)),
+              vertical: false))
+        }
       }
     }
     return out
+  }
+
+  /// The 2×2 grid's per-column and per-row learned minimums (cells are row-major:
+  /// cell index → column = i%2, row = i/2). Used to clamp the grid's split handles.
+  private func gridMins(_ s: Session) -> (colMin: [CGFloat], rowMin: [CGFloat]) {
+    var colMin = [CGFloat](repeating: 0, count: 2)
+    var rowMin = [CGFloat](repeating: 0, count: 2)
+    for slot in 0..<min(s.windows.count, 4) where slot < s.order.count {
+      let m = minSize(of: s.windows[s.order[slot]])
+      if m.width > 0 { colMin[slot % 2] = max(colMin[slot % 2], m.width + gap) }
+      if m.height > 0 { rowMin[slot / 2] = max(rowMin[slot / 2], m.height + gap) }
+    }
+    return (colMin, rowMin)
   }
 
   /// Resize a divider/edge live from a screen-space (Cocoa) cursor point.
@@ -709,12 +745,20 @@ final class WindowManager {
       let vertical = ds[index].vertical  // the stack divides slots 1 and 2
       let raw = vertical ? (point.x - eff.minX) / eff.width : (axY - eff.minY) / eff.height
       s.stackRatio = clampedSplit(s, primary: false, raw: raw)
+    case .gridColumn:
+      let (colMin, _) = gridMins(s)
+      let raw = (point.x - eff.minX) / eff.width
+      s.gridX = Tiling.fitRatio(total: eff.width, min0: colMin[0], min1: colMin[1], fallback: raw)
+    case .gridRow:
+      let (_, rowMin) = gridMins(s)
+      let raw = (axY - eff.minY) / eff.height
+      s.gridY = Tiling.fitRatio(total: eff.height, min0: rowMin[0], min1: rowMin[1], fallback: raw)
     case .edgeLeft: s.insetLeft = clampInset(point.x - usable.minX, usable.width)
     case .edgeRight: s.insetRight = clampInset(usable.maxX - point.x, usable.width)
     case .windowTop(let slot):
       let raw = Tiling.slots(
         kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio,
-        mins: slotMins(s))
+        mins: slotMins(s), gridX: s.gridX, gridY: s.gridY)
       if slot < raw.count {
         ensureVInsets(&s, count)
         let top = max(0, axY - raw[slot].minY)
@@ -723,7 +767,7 @@ final class WindowManager {
     case .windowBottom(let slot):
       let raw = Tiling.slots(
         kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio,
-        mins: slotMins(s))
+        mins: slotMins(s), gridX: s.gridX, gridY: s.gridY)
       if slot < raw.count {
         ensureVInsets(&s, count)
         let bottom = max(0, raw[slot].maxY - axY)
@@ -801,7 +845,7 @@ final class WindowManager {
     let eff = effectiveRect(usable, s)
     let rects = Tiling.slots(
       kind, count: count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio,
-      mins: slotMins(s))
+      mins: slotMins(s), gridX: s.gridX, gridY: s.gridY)
     for slot in 0..<min(count, rects.count) {
       let vi = slot < s.vInsets.count ? s.vInsets[slot] : (top: CGFloat(0), bottom: CGFloat(0))
       let r = Tiling.shrinkVertically(rects[slot], top: vi.top, bottom: vi.bottom)
@@ -844,7 +888,7 @@ final class WindowManager {
     let gap = self.gap
     let rects = Tiling.slots(
       kind, count: s.windows.count, in: eff, gap: gap, ratio: s.ratio, stackRatio: s.stackRatio,
-      mins: slotMins(s))
+      mins: slotMins(s), gridX: s.gridX, gridY: s.gridY)
 
     // A window constrains the split only if it's actually *rigid*: its real size
     // exceeds the slot it was given (it couldn't shrink to fit). Flexible windows

@@ -272,6 +272,21 @@ final class TilingTests: XCTestCase {
     ])
   }
 
+  func testGridAdjustableSplits() {
+    let r = CGRect(x: 0, y: 0, width: 1000, height: 600)
+    // gridX 0.7 → columns 700/300; gridY 0.6 → rows 360/240.
+    let g = Tiling.slots(.grid, count: 4, in: r, gap: 0, gridX: 0.7, gridY: 0.6)
+    XCTAssertEqual(g[0], CGRect(x: 0, y: 0, width: 700, height: 360))  // top-left
+    XCTAssertEqual(g[1], CGRect(x: 700, y: 0, width: 300, height: 360))  // top-right
+    XCTAssertEqual(g[2], CGRect(x: 0, y: 360, width: 700, height: 240))  // bottom-left
+    XCTAssertEqual(g[3], CGRect(x: 700, y: 360, width: 300, height: 240))  // bottom-right
+    // A rigid cell (min width 800 in column 0) clamps gridX up even if it asks lower.
+    let rigid = Tiling.slots(
+      .grid, count: 4, in: r, gap: 0,
+      mins: [CGSize(width: 800, height: 0), .zero, .zero, .zero], gridX: 0.3, gridY: 0.5)
+    XCTAssertEqual(rigid[0].width, 800, accuracy: 0.001)
+  }
+
   // MARK: three tabs — main + stack puts the big one on the left
 
   func testThreeTabMainLeft() {

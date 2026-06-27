@@ -243,9 +243,12 @@ public enum Tiling {
   /// slot. Columns/Rows of 3+ and Grid use it to weight their partitions so a
   /// rigid window keeps its minimum and the others shrink around it; the
   /// ratio-driven layouts ignore it (their fit is handled via `ratio`).
+  ///
+  /// `gridX`/`gridY` size the 2×2 Grid's column and row splits (its draggable
+  /// cross); 0.5 each is an even quad.
   public static func slots(
     _ kind: LayoutKind, count: Int, in rect: CGRect, gap: CGFloat = 8, ratio: CGFloat = 0.5,
-    stackRatio: CGFloat = 0.5, mins: [CGSize] = []
+    stackRatio: CGFloat = 0.5, mins: [CGSize] = [], gridX: CGFloat = 0.5, gridY: CGFloat = 0.5
   ) -> [CGRect] {
     guard count > 0, rect.width > 0, rect.height > 0 else { return [] }
     switch kind {
@@ -260,7 +263,7 @@ public enum Tiling {
         count == 2 ? twoSplit(rect, ratio: ratio, vertical: false) : rows(count, rect, mins: mins, gap: gap),
         by: gap)
     case .grid:
-      return inset(grid(count, rect, mins: mins, gap: gap), by: gap)
+      return inset(grid(count, rect, mins: mins, gap: gap, gridX: gridX, gridY: gridY), by: gap)
     case .mainLeft:
       return inset(mainLeft(count, rect, ratio: ratio, stackRatio: stackRatio), by: gap)
     case .mainTop:
@@ -304,12 +307,14 @@ public enum Tiling {
     }
   }
 
-  static func grid(_ n: Int, _ r: CGRect, mins: [CGSize] = [], gap: CGFloat = 0) -> [CGRect] {
+  static func grid(
+    _ n: Int, _ r: CGRect, mins: [CGSize] = [], gap: CGFloat = 0, gridX: CGFloat = 0.5,
+    gridY: CGFloat = 0.5
+  ) -> [CGRect] {
     let cols = max(1, Int(ceil(Double(n).squareRoot())))
     let rowCount = max(1, Int(ceil(Double(n) / Double(cols))))
     // A column's min width is the widest min among its windows; a row's min height
-    // the tallest among its — then weight columns/rows so a rigid cell's row and
-    // column grow and the rest shrink around it.
+    // the tallest among its.
     var colMin = [CGFloat](repeating: 0, count: cols)
     var rowMin = [CGFloat](repeating: 0, count: rowCount)
     for i in 0..<n {
@@ -318,8 +323,22 @@ public enum Tiling {
       if m.width > 0 { colMin[c] = max(colMin[c], m.width + gap) }
       if m.height > 0 { rowMin[rw] = max(rowMin[rw], m.height + gap) }
     }
-    let colW = weightedLengths(mins: colMin, total: r.width)
-    let rowH = weightedLengths(mins: rowMin, total: r.height)
+    let colW: [CGFloat]
+    let rowH: [CGFloat]
+    if cols == 2, rowCount == 2 {
+      // 2×2: gridX/gridY are the draggable splits, clamped so a rigid cell keeps its
+      // minimum (fitRatio treats gridX/gridY as the preference, the mins as floors).
+      let xr = fitRatio(total: r.width, min0: colMin[0], min1: colMin[1], fallback: gridX)
+      let yr = fitRatio(total: r.height, min0: rowMin[0], min1: rowMin[1], fallback: gridY)
+      let w0 = r.width * xr
+      let h0 = r.height * yr
+      colW = [w0, r.width - w0]  // second = remainder, so columns tile exactly
+      rowH = [h0, r.height - h0]
+    } else {
+      // Other counts: weight so a rigid cell's row/column grows and the rest shrink.
+      colW = weightedLengths(mins: colMin, total: r.width)
+      rowH = weightedLengths(mins: rowMin, total: r.height)
+    }
     var colX = [CGFloat](repeating: r.minX, count: cols)
     for c in 1..<cols where cols > 1 { colX[c] = colX[c - 1] + colW[c - 1] }
     var rowY = [CGFloat](repeating: r.minY, count: rowCount)
